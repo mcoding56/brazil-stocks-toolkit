@@ -88,7 +88,7 @@ with left:
                         "margin_of_safety", "quality_score", "moat_score"]
             if c in picks.columns]
     ui.color_legend("cheap")
-    ui.styled_table(ui.with_overall_score(ui.add_verdict(picks[cols])) if not picks.empty else picks)
+    ui.styled_table(appdata.attach_overall_score(ui.add_verdict(picks[cols])) if not picks.empty else picks)
 
 with right:
     st.subheader("🎓 Meet the investors")

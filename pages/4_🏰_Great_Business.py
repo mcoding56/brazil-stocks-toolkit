@@ -50,4 +50,4 @@ st.plotly_chart(
 cols = [c for c in ["ticker", "sector", "price", "roic", "roe", "gross_margin",
                     "net_margin", "debt_equity", "quality_score", "moat_score"]
         if c in top.columns]
-ui.styled_table(ui.with_overall_score(ui.add_verdict(top[cols])))
+ui.styled_table(appdata.attach_overall_score(ui.add_verdict(top[cols])))

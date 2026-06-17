@@ -59,7 +59,7 @@ st.plotly_chart(
 cols = [c for c in ["ticker", "sector", "price", "intrinsic_value",
                     "margin_of_safety", "fcf_per_share", "liquidity_2m",
                     "quality_score", "moat_score"] if c in df.columns]
-ui.styled_table(ui.with_overall_score(ui.add_verdict(df[cols])))
+ui.styled_table(appdata.attach_overall_score(ui.add_verdict(df[cols])))
 
 st.caption(
     "Intrinsic value uses a 13% nominal BRL discount rate and 4% terminal "

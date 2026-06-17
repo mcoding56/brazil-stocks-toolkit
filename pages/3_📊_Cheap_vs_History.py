@@ -87,4 +87,4 @@ with tab_composite:
             ),
             use_container_width=True,
         )
-        ui.styled_table(ui.with_overall_score(comp.head(top_n)))
+        ui.styled_table(appdata.attach_overall_score(comp.head(top_n)))

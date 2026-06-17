@@ -159,6 +159,28 @@ def overall_score_map(min_liquidity: Optional[float] = None) -> dict[str, float]
     return dict(zip(df["ticker"], df["overall_score"]))
 
 
+def attach_overall_score(df: pd.DataFrame, min_liquidity: Optional[float] = None) -> pd.DataFrame:
+    """Attach the universal Overall Score column to a ticker table.
+
+    This lives in the data layer so Streamlit pages can add the score without
+    depending on a UI helper that may not exist in an older deployed revision.
+    """
+    if df is None or df.empty or "ticker" not in df.columns:
+        return df
+    scores = overall_score_map(min_liquidity=min_liquidity)
+    if not scores:
+        return df
+    vals = pd.to_numeric(df["ticker"].map(scores), errors="coerce")
+    if vals.notna().sum() == 0:
+        return df
+    out = df.copy()
+    if "overall_score" in out.columns:
+        out = out.drop(columns=["overall_score"])
+    pos = 1 if "Verdict" in out.columns else 0
+    out.insert(pos, "overall_score", vals.round(0))
+    return out
+
+
 @st.cache_data(show_spinner="Backtesting momentum…")
 def momentum_backtest(
     n_quantiles: int = 3, min_dollar_vol: float = 5_000_000.0

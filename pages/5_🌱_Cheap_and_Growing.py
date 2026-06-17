@@ -68,7 +68,7 @@ garp = plot_df[
 st.subheader(f"GARP candidates ({len(garp)})")
 sort_col = "alpha_score" if "alpha_score" in garp.columns else "growth_score"
 ui.styled_table(
-    ui.with_overall_score(
+    appdata.attach_overall_score(
         ui.add_verdict(garp.sort_values(sort_col, ascending=False).reset_index(drop=True))
     )
 )
