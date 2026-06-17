@@ -17,6 +17,7 @@ ui.page_header(
     "to 0–1 *within the surviving cohort* before weighting, so the weights below are "
     "literally each pillar's maximum contribution.",
 )
+ui.metric_glossary()
 
 with st.expander("Why this differs from the Graham-Buffett screen", expanded=False):
     st.markdown(

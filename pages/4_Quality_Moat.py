@@ -14,6 +14,7 @@ ui.page_header(
     "Business-quality and competitive-advantage scores (0–1) built from "
     "percentile ranks of ROIC, margins and leverage.",
 )
+ui.metric_glossary()
 
 st.sidebar.header("Filters")
 top_n = st.sidebar.slider("Show top N", 10, 80, 30, step=5)

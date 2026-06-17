@@ -14,6 +14,7 @@ ui.page_header(
     "Names ranked by margin of safety vs. a two-stage discounted-cash-flow "
     "estimate of intrinsic value.",
 )
+ui.metric_glossary()
 
 st.sidebar.header("Filters")
 top_n = st.sidebar.slider("Show top N", 5, 60, 20, step=5)

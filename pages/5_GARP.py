@@ -14,6 +14,7 @@ ui.page_header(
     "Names that are statistically cheap *and* growing. The bottom-right "
     "quadrant (cheap value Z, high growth) is the GARP sweet spot.",
 )
+ui.metric_glossary()
 
 st.sidebar.header("Thresholds")
 score_type = st.sidebar.radio(

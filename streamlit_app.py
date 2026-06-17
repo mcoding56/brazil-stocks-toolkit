@@ -73,6 +73,8 @@ with right:
     )
 
 st.divider()
+ui.metric_glossary()
+st.divider()
 st.caption(
     "Use the sidebar to navigate between pages. Built on the open-source "
     "`brazil_stocks` toolkit."

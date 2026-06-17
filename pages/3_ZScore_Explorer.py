@@ -34,6 +34,8 @@ with tab_metric:
         list(ui.METRIC_LABELS.keys()),
         format_func=lambda m: ui.METRIC_LABELS.get(m, m),
     )
+    ui.metric_explainer(metric)
+    ui.metric_explainer(score_type)
     ascending = metric in ui.LOWER_IS_CHEAPER
     rank = appdata.zscore_ranking(
         metric=metric, score_type=score_type, top_n=top_n, ascending=ascending

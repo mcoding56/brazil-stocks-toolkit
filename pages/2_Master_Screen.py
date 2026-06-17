@@ -14,6 +14,7 @@ ui.page_header(
     "A single `master_score` blending seven value priorities: margin of safety, "
     "growth, ROIC, low leverage, moat, quality and statistical cheapness.",
 )
+ui.metric_glossary()
 
 st.sidebar.header("Filters")
 top_n = st.sidebar.slider("Show top N", 5, 60, 20, step=5)
