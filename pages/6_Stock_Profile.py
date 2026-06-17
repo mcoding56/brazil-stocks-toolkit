@@ -10,7 +10,18 @@ from app import ui
 
 st.set_page_config(page_title="Stock Profile · Brazil Stocks", page_icon="🔎", layout="wide")
 
-ui.page_header("🔎 Stock Profile", "Fundamentals, Z-scores, price history and a live DCF for a single ticker.")
+ui.page_header(
+    "🔎 One-stock deep dive",
+    "Everything about a single company in one place: how cheap it is, how good the "
+    "business is, its price history and a fresh fair-value estimate.",
+)
+ui.approach_banner(
+    "I have a company in mind — is it cheap, and is it any good?",
+    "every approach, applied to one stock",
+    "Pick a ticker in the sidebar. The headline shows price vs. fair value at a "
+    "glance; below you'll find the detailed numbers, charts and a live valuation.",
+)
+ui.learn_link()
 
 tickers = appdata.all_tickers()
 if not tickers:
@@ -44,6 +55,16 @@ c4.metric("Quality score", f"{q:.0%}" if q is not None else "—")
 sector = fund.get("sector")
 if sector:
     st.caption(f"Sector: **{sector}**")
+
+# Plain-English one-line verdict from the headline numbers.
+_verdict_df = ui.add_verdict(pd.DataFrame([{
+    "margin_of_safety": mos,
+    "quality_score": q,
+}]))
+if "Verdict" in _verdict_df.columns:
+    _v = _verdict_df["Verdict"].iloc[0]
+    if _v and _v != "—":
+        st.markdown(f"### {_v}")
 
 st.divider()
 

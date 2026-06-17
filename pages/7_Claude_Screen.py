@@ -12,14 +12,21 @@ from brazil_stocks.orchestrator import CLAUDE_WEIGHTS
 st.set_page_config(page_title="Claude Screen · Brazil Stocks", page_icon="🧠", layout="wide")
 
 ui.page_header(
-    "🧠 The Claude Screen",
-    "An opinionated rebuild of the master screen. Every pillar is percentile-ranked "
-    "to 0–1 *within the surviving cohort* before weighting, so the weights below are "
-    "literally each pillar's maximum contribution.",
+    "🧠 All-in-one ranking — every signal blended",
+    "Our most complete screen. It scores each company on six things that matter — "
+    "quality, momentum, value, safety, moat and growth — and blends them into one "
+    "ranking you can tune.",
 )
-ui.metric_glossary()
+ui.approach_banner(
+    "If I weigh up every signal at once, which companies come out on top?",
+    "modern multi-factor investing",
+    "Each of the six 'pillars' is scored 0–100% and combined with the weights you "
+    "set in the sidebar. The result is a single, well-rounded shortlist — with a "
+    "built-in guard against cheap-but-falling value traps.",
+)
+ui.learn_link()
 
-with st.expander("Why this differs from the Graham-Buffett screen", expanded=False):
+with st.expander("How is this different from the Quality-Value Screen?", expanded=False):
     st.markdown(
         """
 The classic `master_score` simply **adds** margin of safety, quality, moat, growth and
@@ -149,7 +156,8 @@ cols = [c for c in [
     "quality_pillar", "momentum_pillar", "safety_pillar", "valuation_pillar",
     "moat_pillar", "growth_pillar", "claude_score",
 ] if c in df.columns]
-ui.styled_table(df[cols])
+ui.color_legend("cheap")
+ui.styled_table(ui.add_verdict(df[cols]))
 
 # ── Proof: does the momentum pillar actually predict returns? ────────────────
 st.divider()

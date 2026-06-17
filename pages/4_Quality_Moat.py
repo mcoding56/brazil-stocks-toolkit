@@ -10,11 +10,18 @@ from app import ui
 st.set_page_config(page_title="Quality & Moat · Brazil Stocks", page_icon="🛡️", layout="wide")
 
 ui.page_header(
-    "🛡️ Quality & Moat",
-    "Business-quality and competitive-advantage scores (0–1) built from "
-    "percentile ranks of ROIC, margins and leverage.",
+    "🛡️ Great business? — Quality & Moat",
+    "How good and how durable each business is — measured by how much profit it "
+    "earns on its capital, its margins and how little debt it carries.",
 )
-ui.metric_glossary()
+ui.approach_banner(
+    "Is this a genuinely great, durable business worth owning for the long run?",
+    "Warren Buffett & Bruce Greenwald",
+    "'Quality' captures how efficiently a company turns money into profit. 'Moat' "
+    "is its durable competitive edge. The best businesses score high on both "
+    "(top-right of the chart).",
+)
+ui.learn_link()
 
 st.sidebar.header("Filters")
 top_n = st.sidebar.slider("Show top N", 10, 80, 30, step=5)
@@ -28,6 +35,8 @@ if df.empty:
     st.stop()
 
 top = df.head(top_n)
+ui.color_legend("quality")
+ui.chart_caption("Top-right = high quality AND a wide moat — the best businesses. Brighter colour = higher returns on capital.")
 st.plotly_chart(
     charts.scatter_quadrant(
         top, x="quality_score", y="moat_score", label_col="ticker",
@@ -41,4 +50,4 @@ st.plotly_chart(
 cols = [c for c in ["ticker", "sector", "price", "roic", "roe", "gross_margin",
                     "net_margin", "debt_equity", "quality_score", "moat_score"]
         if c in top.columns]
-ui.styled_table(top[cols])
+ui.styled_table(ui.add_verdict(top[cols]))

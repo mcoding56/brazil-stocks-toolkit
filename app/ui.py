@@ -307,3 +307,130 @@ def metric_glossary(expanded: bool = False) -> None:
                 pd.DataFrame(rows).set_index("Metric"),
                 use_container_width=True,
             )
+
+
+# ---------------------------------------------------------------------------
+# Beginner-friendly framing helpers
+# ---------------------------------------------------------------------------
+
+# The five value-investing legends, mapped to a one-line philosophy and the page
+# that applies their idea. Reused on the home page and the Learn page.
+INVESTOR_LEGENDS: list[tuple[str, str, str]] = [
+    ("Benjamin Graham",
+     "Buy with a margin of safety — pay clearly less than a business is worth.",
+     "Quality-Value Screen"),
+    ("Warren Buffett",
+     "Wonderful businesses (high returns on capital, a durable moat) at a fair price.",
+     "Fair Value · Great Business?"),
+    ("Aswath Damodaran",
+     "Value a company by the cash it will generate in the future (a DCF).",
+     "Fair Value"),
+    ("Bruce Greenwald",
+     "A real competitive advantage shows up as high, stable returns on capital.",
+     "Great Business?"),
+    ("Peter Lynch",
+     "Growth at a reasonable price — fast growers you don't overpay for.",
+     "Cheap AND Growing"),
+]
+
+
+def approach_banner(question: str, investors: str, why: str) -> None:
+    """Render a plain-English framing block right under the page header.
+
+    Parameters
+    ----------
+    question  : the plain-English question this page answers (the headline).
+    investors : the investing legend(s) whose approach this applies.
+    why       : one line on why the approach works / what to take away.
+    """
+    st.info(f"**{question}**\n\n"
+            f"🎓 *Approach of {investors}.* {why}", icon="❓")
+
+
+def color_legend(kind: str = "cheap") -> None:
+    """One-line caption explaining the green→red colour scale used in charts."""
+    if kind == "quality":
+        st.caption("🟢 strong / high-quality   ·   ⚪ average   ·   🔴 weak")
+    elif kind == "growth":
+        st.caption("🟢 cheap **and** growing   ·   ⚪ mixed   ·   🔴 expensive / shrinking")
+    else:
+        st.caption("🟢 cheap (good value)   ·   ⚪ fairly priced   ·   🔴 expensive")
+
+
+def chart_caption(text: str) -> None:
+    """Small 'what to look for' hint shown just above a chart."""
+    st.caption(f"👀 {text}")
+
+
+def learn_link() -> None:
+    """Replace the bulky per-page glossary with a compact link to the Learn page."""
+    try:
+        st.page_link(
+            "pages/8_Learn.py",
+            label="New to these terms? Open the plain-English guide →",
+            icon="📚",
+        )
+    except Exception:
+        # st.page_link is unavailable in very old Streamlit / some test harnesses.
+        st.caption("📚 New to these terms? See the **Learn** page in the sidebar.")
+
+
+def add_verdict(df: pd.DataFrame) -> pd.DataFrame:
+    """Add a plain-English ``Verdict`` column derived from existing score columns.
+
+    Combines a *cheapness* read (margin of safety, then value/price z-scores) with
+    a *quality* read (quality_score) into a one-glance badge. NaN-safe: a missing
+    input simply drops out of that side of the verdict. Returns a copy with the
+    ``Verdict`` column inserted first; a no-op if no usable columns are present.
+    """
+    if df is None or df.empty:
+        return df
+
+    n = len(df)
+
+    def _num(col: str) -> pd.Series | None:
+        return pd.to_numeric(df[col], errors="coerce") if col in df.columns else None
+
+    mos = _num("margin_of_safety")
+    val_z = _num("value_zscore")
+    price_z = _num("price_vwap_z")
+    quality = _num("quality_score")
+
+    # Cheapness: True = cheap, False = expensive, NaN = unknown.
+    cheap = pd.Series([pd.NA] * n, index=df.index, dtype="object")
+    if mos is not None:
+        cheap = cheap.mask(mos >= 0.20, True).mask(mos <= 0.0, False)
+    elif val_z is not None:
+        cheap = cheap.mask(val_z <= -0.5, True).mask(val_z >= 0.5, False)
+    elif price_z is not None:
+        cheap = cheap.mask(price_z <= -0.5, True).mask(price_z >= 0.5, False)
+
+    # Quality: True = strong, False = weak, NaN = unknown.
+    strong = pd.Series([pd.NA] * n, index=df.index, dtype="object")
+    if quality is not None:
+        strong = strong.mask(quality >= 0.60, True).mask(quality < 0.40, False)
+
+    if cheap.isna().all() and strong.isna().all():
+        return df  # nothing to say
+
+    def _verdict(c, s) -> str:
+        if c is True and s is True:
+            return "🟢 Cheap & high-quality"
+        if c is True and s is False:
+            return "⚠️ Cheap but weak"
+        if c is True:
+            return "🟢 Looks cheap"
+        if c is False and s is True:
+            return "🟡 Great business, pricey"
+        if c is False:
+            return "🔴 Looks expensive"
+        if s is True:
+            return "💪 High-quality"
+        if s is False:
+            return "⚠️ Lower-quality"
+        return "—"
+
+    verdict = [_verdict(cheap.iloc[i], strong.iloc[i]) for i in range(n)]
+    out = df.copy()
+    out.insert(0, "Verdict", verdict)
+    return out

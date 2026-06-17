@@ -10,18 +10,24 @@ from app import ui
 st.set_page_config(page_title="GARP · Brazil Stocks", page_icon="🌱", layout="wide")
 
 ui.page_header(
-    "🌱 GARP — Growth at a Reasonable Price",
-    "Names that are statistically cheap *and* growing. The bottom-right "
-    "quadrant (cheap value Z, high growth) is the GARP sweet spot.",
+    "🌱 Cheap AND growing — GARP",
+    "Companies that are both reasonably priced and growing fast — the rare "
+    "combination Peter Lynch hunted for.",
 )
-ui.metric_glossary()
+ui.approach_banner(
+    "Which fast-growing companies can I still buy at a sensible price?",
+    "Peter Lynch",
+    "GARP = 'Growth At a Reasonable Price'. The sweet spot is the bottom-right of "
+    "the chart: cheap on the left axis, fast-growing on the up axis.",
+)
+ui.learn_link()
 
 st.sidebar.header("Thresholds")
 score_type = st.sidebar.radio(
-    "Z-score type",
+    "Compare against…",
     ["cross_sectional_zscore", "time_series_zscore"],
-    format_func=lambda s: "Cross-sectional (vs. peers)"
-    if s == "cross_sectional_zscore" else "Time-series (vs. own history)",
+    format_func=lambda s: "Its peers (right now)"
+    if s == "cross_sectional_zscore" else "Its own history (over time)",
 )
 value_threshold = st.sidebar.slider(
     "Max. value Z-score (cheapness)", -3.0, 1.0, -0.5, step=0.25,
@@ -43,6 +49,8 @@ if df.empty or "value_zscore" not in df.columns or "growth_score" not in df.colu
 
 plot_df = df.dropna(subset=["value_zscore", "growth_score"]).copy()
 color_col = "alpha_score" if "alpha_score" in plot_df.columns else None
+ui.color_legend("growth")
+ui.chart_caption("Look bottom-right: cheap (left) and growing (up). That quadrant is the GARP sweet spot.")
 st.plotly_chart(
     charts.scatter_quadrant(
         plot_df, x="value_zscore", y="growth_score", label_col="ticker",
@@ -59,4 +67,6 @@ garp = plot_df[
 ]
 st.subheader(f"GARP candidates ({len(garp)})")
 sort_col = "alpha_score" if "alpha_score" in garp.columns else "growth_score"
-ui.styled_table(garp.sort_values(sort_col, ascending=False).reset_index(drop=True))
+ui.styled_table(
+    ui.add_verdict(garp.sort_values(sort_col, ascending=False).reset_index(drop=True))
+)

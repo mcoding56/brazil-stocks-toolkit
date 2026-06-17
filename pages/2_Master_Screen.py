@@ -10,11 +10,17 @@ from app import ui
 st.set_page_config(page_title="Master Screen · Brazil Stocks", page_icon="🏆", layout="wide")
 
 ui.page_header(
-    "🏆 Graham-Buffett Master Screen",
-    "A single `master_score` blending seven value priorities: margin of safety, "
-    "growth, ROIC, low leverage, moat, quality and statistical cheapness.",
+    "🏆 Quality-Value Screen — a good business at a fair price",
+    "One overall score that rewards companies which are cheap, profitable, growing, "
+    "lowly indebted and have a durable edge — all at once.",
 )
-ui.metric_glossary()
+ui.approach_banner(
+    "Which companies tick every box: cheap, high-quality, safe and growing?",
+    "Benjamin Graham & Warren Buffett",
+    "We score each company on seven value priorities and blend them into a single "
+    "ranking. Higher score = a better all-round value-investing candidate.",
+)
+ui.learn_link()
 
 st.sidebar.header("Filters")
 top_n = st.sidebar.slider("Show top N", 5, 60, 20, step=5)
@@ -46,6 +52,8 @@ if df.empty:
     st.info("No rows match the current filters. Try loosening the thresholds.")
     st.stop()
 
+ui.color_legend("cheap")
+ui.chart_caption("Longer bars rank higher overall — a better blend of cheap, quality, safe and growing.")
 st.plotly_chart(
     charts.hbar_ranking(
         df, value_col="master_score", label_col="ticker",
@@ -59,4 +67,4 @@ cols = [c for c in ["ticker", "sector", "price", "pl", "pvp", "roic",
                     "debt_equity", "intrinsic_value", "margin_of_safety",
                     "quality_score", "moat_score", "growth_score",
                     "value_zscore", "price_vwap_z", "master_score"] if c in df.columns]
-ui.styled_table(df[cols])
+ui.styled_table(ui.add_verdict(df[cols]))

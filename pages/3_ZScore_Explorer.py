@@ -10,17 +10,25 @@ from app import ui
 st.set_page_config(page_title="Z-Score Explorer · Brazil Stocks", page_icon="📊", layout="wide")
 
 ui.page_header(
-    "📊 Z-Score Explorer",
-    "How cheap each name is vs. its own history (time-series) and vs. peers "
-    "(cross-sectional). Green = cheap, red = expensive.",
+    "📊 Cheap vs. history — the Z-Score Explorer",
+    "A simple 'how unusual is this price?' tool. It shows whether a stock is cheap "
+    "compared to its own past and to its peers right now.",
 )
+ui.approach_banner(
+    "Is this stock unusually cheap versus its own history and its peers?",
+    "statistical / mean-reversion investing",
+    "A z-score of 0 is perfectly normal; −2 means unusually cheap, +2 unusually "
+    "expensive. Bargains often sit at the negative end and tend to drift back to "
+    "normal over time.",
+)
+ui.learn_link()
 
 st.sidebar.header("Settings")
 score_type = st.sidebar.radio(
-    "Z-score type",
+    "Compare against…",
     ["time_series_zscore", "cross_sectional_zscore"],
-    format_func=lambda s: "Time-series (vs. own history)"
-    if s == "time_series_zscore" else "Cross-sectional (vs. peers)",
+    format_func=lambda s: "Its own history (over time)"
+    if s == "time_series_zscore" else "Its peers (right now)",
 )
 top_n = st.sidebar.slider("Tickers in heatmap", 10, 60, 25, step=5)
 
