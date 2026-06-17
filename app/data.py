@@ -144,6 +144,40 @@ def claude_screen(
     return df.head(top_n) if top_n else df
 
 
+@st.cache_data(show_spinner="Backtesting momentum…")
+def momentum_backtest(
+    n_quantiles: int = 3, min_dollar_vol: float = 5_000_000.0
+) -> dict:
+    """
+    Run the walk-forward momentum backtest and return a JSON-friendly dict
+    (``summary`` records, ``equity`` curve, ``params``) so Streamlit can cache it.
+    Returns an empty dict when there is not enough price history.
+
+    The backtest needs *breadth* (a wide universe and a long window) to be
+    meaningful, so it deliberately reads the **full** local DB when present and
+    only falls back to the slim DB when that is all that ships.
+    """
+    from brazil_stocks.analysis.backtest import MomentumBacktester
+    from brazil_stocks.storage.database import DatabaseManager
+
+    path = FULL_DB if Path(FULL_DB).exists() else SLIM_DB
+    db = DatabaseManager(path)
+    # Slim DB is large-cap-only, so relax the minimum-names gate there.
+    min_names = 20 if path == FULL_DB else 12
+    res = MomentumBacktester(
+        db, n_quantiles=n_quantiles, min_dollar_vol=min_dollar_vol, min_names=min_names
+    ).run()
+    if res is None:
+        return {}
+    return {
+        "summary": res.summary.reset_index(names="basket"),
+        "equity": res.equity_curves.reset_index(),
+        "params": {**res.params, "source": "full DB" if path == FULL_DB else "slim DB"},
+        "headline": res.headline(),
+        "top_label": res.top_label,
+    }
+
+
 @st.cache_data(show_spinner="Ranking by Z-score…")
 def zscore_ranking(
     metric: str, score_type: str, top_n: int, ascending: bool

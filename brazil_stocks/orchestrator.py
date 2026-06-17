@@ -42,6 +42,7 @@ from brazil_stocks.analysis.zscore import FUNDAMENTAL_METRICS, ZScoreAnalyzer
 from brazil_stocks.analysis.dcf import DCFValuator
 from brazil_stocks.analysis.quality import QualityScorer
 from brazil_stocks.analysis.factors import FactorAnalyzer
+from brazil_stocks.analysis.backtest import BacktestResult, MomentumBacktester
 from brazil_stocks.fetchers.fundamentus import FundamentusFetcher
 from brazil_stocks.fetchers.yfinance_client import YFinanceFetcher
 from brazil_stocks.models.schemas import FundamentalSnapshot
@@ -127,6 +128,31 @@ class StockAnalysisOrchestrator:
         )
         self.quality_scorer = QualityScorer(self.db)
         self.factor_analyzer = FactorAnalyzer(self.db)
+        self.momentum_backtester = MomentumBacktester(self.db)
+
+    # ------------------------------------------------------------------
+    # Factor validation
+    # ------------------------------------------------------------------
+
+    def backtest_momentum(
+        self,
+        tickers: list[str] | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        n_quantiles: int = 5,
+        min_dollar_vol: float = 5_000_000.0,
+    ) -> BacktestResult | None:
+        """
+        Walk-forward, point-in-time backtest of cross-sectional 12-1 momentum on
+        the stored price history — the honest validation of the momentum pillar.
+
+        Returns a :class:`BacktestResult` (equity curves, per-period returns and a
+        performance summary), or ``None`` if there is not enough history.
+        """
+        bt = MomentumBacktester(
+            self.db, n_quantiles=n_quantiles, min_dollar_vol=min_dollar_vol
+        )
+        return bt.run(tickers=tickers, start=start, end=end)
 
     # ------------------------------------------------------------------
     # Full pipeline

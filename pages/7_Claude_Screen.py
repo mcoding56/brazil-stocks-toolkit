@@ -148,3 +148,64 @@ cols = [c for c in [
     "moat_pillar", "growth_pillar", "claude_score",
 ] if c in df.columns]
 ui.styled_table(df[cols])
+
+# ── Proof: does the momentum pillar actually predict returns? ────────────────
+st.divider()
+st.subheader("📈 Does momentum actually work? — a walk-forward backtest")
+st.caption(
+    "The honest validation of the new momentum pillar. At each month-end we rank every "
+    "liquid name by the same 12-1 momentum used above, sort into baskets, hold one month "
+    "and chain the returns — **no look-ahead**. Top basket = highest momentum, bottom = "
+    "lowest. Read the *top-vs-bottom spread* as the evidence the signal carries information."
+)
+with st.expander("Run the momentum backtest", expanded=False):
+    n_q = st.radio("Baskets", [3, 5], index=1, horizontal=True,
+                   help="Number of equal-count momentum baskets.")
+    bt = appdata.momentum_backtest(n_quantiles=n_q, min_dollar_vol=5_000_000.0)
+    if not bt:
+        st.info("Not enough price history in the current database to backtest.")
+    else:
+        p = bt["params"]
+        st.markdown(
+            f"**{p['start']} → {p['end']}** · {p['n_periods']} monthly rebalances · "
+            f"universe {p['universe_size']} names · _source: {p.get('source', 'DB')}_"
+        )
+        st.success(bt["headline"])
+
+        eq = bt["equity"].set_index("date")
+        top, bot = bt["top_label"], "Q1"
+        fig = go.Figure()
+        styling = {
+            bot: ("#d62728", "solid", 1.6),
+            top: ("#2ca02c", "solid", 2.4),
+            "Universe": ("#7f7f7f", "solid", 1.6),
+            "LongShort": ("#1f77b4", "dash", 2.2),
+        }
+        for col, (color, dash, width) in styling.items():
+            if col in eq.columns:
+                label = {bot: f"{bot} (worst momentum)", top: f"{top} (best momentum)"}.get(col, col)
+                fig.add_trace(go.Scatter(
+                    x=eq.index, y=eq[col], name=label,
+                    line=dict(color=color, dash=dash, width=width),
+                ))
+        fig.add_hline(y=1.0, line_width=0.8, line_color="black", opacity=0.4)
+        fig.update_layout(
+            title="Growth of R$1 by momentum basket (log scale)",
+            yaxis_title="Growth of R$1", yaxis_type="log",
+            height=420, margin=dict(l=10, r=10, t=50, b=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        summ = bt["summary"]
+        st.dataframe(
+            summ.style.format({
+                "CAGR": "{:.1%}", "Vol": "{:.1%}", "Sharpe": "{:.2f}",
+                "MaxDD": "{:.1%}", "HitRate": "{:.0%}", "Periods": "{:.0f}",
+            }),
+            use_container_width=True, hide_index=True,
+        )
+        st.caption(
+            "Survivorship caveat: the panel is whatever the database holds today, so absolute "
+            "levels flatter the survivors. The monotonic top-vs-bottom spread is the real signal."
+        )
