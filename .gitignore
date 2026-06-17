@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Databases — ship only the slim, read-only DB used by the web app
+data/brazil_stocks.db
+data/brazil_stocks.db-shm
+data/brazil_stocks.db-wal
+data/backups/
+!data/brazil_stocks_slim.db
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.log
+
+# Scratch / debug artefacts
+_*.py
+_*.log
+_*.txt
+debug_*.py
+debug_*_out.txt
