@@ -33,8 +33,9 @@ margin of safety — full, uncapped weight.
 
 1. **Intentional weighting.** Each pillar is percentile-ranked to 0–1 first, so the
    weights are the literal maximum contribution.
-2. **The DCF is demoted.** Margin of safety is winsorised and sits at 40% *inside* the
-   valuation pillar, behind robust peer multiples (60%).
+2. **The DCF is demoted.** Margin of safety is winsorised and sits at 30% *inside* the
+   valuation pillar, behind robust peer multiples (50%) and a price-vs-VWAP cheapness
+   tilt (20%).
 3. **Quality and moat are de-correlated.** Moat keeps a deliberately small 15% weight.
 4. **Leverage is a graded penalty, not a gate** — its own 20% safety pillar.
 
@@ -55,7 +56,7 @@ st.sidebar.header("Pillar weights")
 st.sidebar.caption("Defaults reflect *reliability × durability*. They are re-normalised to 100%.")
 w_quality = st.sidebar.slider("Quality (ROIC, margins)", 0.0, 0.50, CLAUDE_WEIGHTS["quality"], 0.05)
 w_momentum = st.sidebar.slider("Momentum (12-1 trend, low-vol)", 0.0, 0.50, CLAUDE_WEIGHTS["momentum"], 0.05)
-w_valuation = st.sidebar.slider("Valuation (multiples + DCF)", 0.0, 0.50, CLAUDE_WEIGHTS["valuation"], 0.05)
+w_valuation = st.sidebar.slider("Valuation (multiples + DCF + VWAP)", 0.0, 0.50, CLAUDE_WEIGHTS["valuation"], 0.05)
 w_safety = st.sidebar.slider("Safety (low leverage)", 0.0, 0.50, CLAUDE_WEIGHTS["safety"], 0.05)
 w_moat = st.sidebar.slider("Moat (durability)", 0.0, 0.50, CLAUDE_WEIGHTS["moat"], 0.05)
 w_growth = st.sidebar.slider("Growth (ROIC-conditioned)", 0.0, 0.50, CLAUDE_WEIGHTS["growth"], 0.05)

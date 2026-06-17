@@ -38,7 +38,7 @@ from tqdm import tqdm
 
 from brazil_stocks.analysis.growth import COMPOSITE_METRIC as GROWTH_SCORE_METRIC, GrowthAnalyzer
 from brazil_stocks.analysis.metrics import MetricsCalculator
-from brazil_stocks.analysis.zscore import FUNDAMENTAL_METRICS, ZScoreAnalyzer
+from brazil_stocks.analysis.zscore import FUNDAMENTAL_METRICS, PRICE_METRIC, ZScoreAnalyzer
 from brazil_stocks.analysis.dcf import DCFValuator
 from brazil_stocks.analysis.quality import QualityScorer
 from brazil_stocks.analysis.factors import FactorAnalyzer
@@ -73,9 +73,11 @@ CLAUDE_WEIGHTS: Dict[str, float] = {
 _CLAUDE_MOM_TREND_WEIGHT = 0.70
 _CLAUDE_MOM_LOWVOL_WEIGHT = 0.30
 
-# Inside the valuation pillar, robust peer multiples lead the noisy DCF estimate.
-_CLAUDE_VAL_MULTIPLES_WEIGHT = 0.60
-_CLAUDE_VAL_DCF_WEIGHT = 0.40
+# Inside the valuation pillar, robust peer multiples lead the noisy DCF estimate,
+# with the price-vs-VWAP cheapness signal as a complementary mean-reversion tilt.
+_CLAUDE_VAL_MULTIPLES_WEIGHT = 0.50
+_CLAUDE_VAL_DCF_WEIGHT = 0.30
+_CLAUDE_VAL_PRICE_WEIGHT = 0.20
 
 # DCF margin of safety is winsorised to this band before ranking, so a single
 # runaway intrinsic-value estimate cannot dominate the screen.
@@ -706,9 +708,14 @@ class StockAnalysisOrchestrator:
             fund = fund.merge(
                 v_pivot[["value_zscore"]].reset_index(), on="ticker", how="left"
             )
+            # Price-vs-VWAP cheapness (time-series): cheap names sit below VWAP.
+            pz = zdf[zdf["metric"] == PRICE_METRIC][["ticker", "time_series_zscore"]]
+            pz = pz.rename(columns={"time_series_zscore": "price_vwap_z"})
+            fund = fund.merge(pz, on="ticker", how="left")
         else:
             fund["growth_score"] = pd.NA
             fund["value_zscore"] = pd.NA
+            fund["price_vwap_z"] = pd.NA
 
         # Apply filters
         out = fund.copy()
@@ -725,12 +732,15 @@ class StockAnalysisOrchestrator:
             return out
 
         # Composite master score: each pillar contributes a normalised term.
+        # A negative value_zscore (cheap vs peers) and a negative price_vwap_z
+        # (price below its own VWAP) both *add* to the score.
         out["master_score"] = (
             out["margin_of_safety"].fillna(0)
             + out["quality_score"].fillna(0)
             + out["moat_score"].fillna(0)
             + out["growth_score"].fillna(0).clip(-3, 3) / 3.0
             - out["value_zscore"].fillna(0).clip(-3, 3) / 3.0
+            - out["price_vwap_z"].fillna(0).clip(-3, 3) / 6.0
         )
         out = out.sort_values("master_score", ascending=False).reset_index(drop=True)
         return out.head(top_n) if top_n else out
@@ -758,9 +768,9 @@ class StockAnalysisOrchestrator:
            contribution of each pillar — no more accidental dominance by
            whichever column happens to have the widest numeric range.
         2. **The noisiest signal is demoted.** The single-point DCF margin of
-           safety is winsorised and folded into the *valuation* pillar at 40%,
-           behind robust peer multiples at 60% — instead of carrying full,
-           uncapped weight.
+           safety is winsorised and folded into the *valuation* pillar at 30%,
+           behind robust peer multiples at 50% and a price-vs-VWAP cheapness
+           tilt at 20% — instead of carrying full, uncapped weight.
         3. **Quality and moat are de-correlated.** Return on capital is no
            longer triple-counted; moat keeps a deliberately small 15% weight.
         4. **Leverage is a graded penalty, not a gate.** Balance-sheet safety
@@ -844,9 +854,14 @@ class StockAnalysisOrchestrator:
             fund = fund.merge(
                 v_pivot[["value_zscore"]].reset_index(), on="ticker", how="left"
             )
+            # Price-vs-VWAP cheapness (time-series): cheap names sit below VWAP.
+            pz = zdf[zdf["metric"] == PRICE_METRIC][["ticker", "time_series_zscore"]]
+            pz = pz.rename(columns={"time_series_zscore": "price_vwap_z"})
+            fund = fund.merge(pz, on="ticker", how="left")
         else:
             fund["growth_score"] = pd.NA
             fund["value_zscore"] = pd.NA
+            fund["price_vwap_z"] = pd.NA
 
         # Gates (membership of the peer cohort, not graded).
         cohort = fund.copy()
@@ -884,13 +899,15 @@ class StockAnalysisOrchestrator:
             (_pct(cohort["current_ratio"]), 0.25),
         ])
 
-        # Pillar 3 — Valuation: robust peer multiples lead the winsorised DCF.
+        # Pillar 3 — Valuation: robust peer multiples lead the winsorised DCF,
+        # with the price-vs-VWAP cheapness signal as a mean-reversion tilt.
         mos_capped = pd.to_numeric(cohort["margin_of_safety"], errors="coerce").clip(
             lower=_CLAUDE_MOS_FLOOR, upper=_CLAUDE_MOS_CAP
         )
         valuation_pillar = _blend([
             (_pct(cohort["value_zscore"], invert=True), _CLAUDE_VAL_MULTIPLES_WEIGHT),
             (_pct(mos_capped), _CLAUDE_VAL_DCF_WEIGHT),
+            (_pct(cohort["price_vwap_z"], invert=True), _CLAUDE_VAL_PRICE_WEIGHT),
         ])
 
         # Pillar 4 — Moat durability (deliberately small to avoid double-counting).
