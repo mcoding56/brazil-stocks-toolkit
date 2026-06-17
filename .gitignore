@@ -26,6 +26,8 @@ data/brazil_stocks.db-shm
 data/brazil_stocks.db-wal
 data/backups/
 !data/brazil_stocks_slim.db
+data/brazil_stocks_slim.db-shm
+data/brazil_stocks_slim.db-wal
 
 # OS / editor
 .DS_Store

@@ -124,6 +124,26 @@ def master_screen(
     return df.head(top_n) if top_n else df
 
 
+@st.cache_data(show_spinner="Running the Claude Screen…")
+def claude_screen(
+    weights: Optional[dict],
+    roic_hurdle: float,
+    exclude_financials: bool,
+    min_liquidity: Optional[float],
+    top_n: int,
+) -> pd.DataFrame:
+    df = get_orchestrator().screen_claude(
+        weights=weights,
+        roic_hurdle=roic_hurdle,
+        exclude_financials=exclude_financials,
+        min_liquidity=min_liquidity,
+        top_n=0,
+    )
+    if exclude_financials:
+        df = _drop_known_financials(df)
+    return df.head(top_n) if top_n else df
+
+
 @st.cache_data(show_spinner="Ranking by Z-score…")
 def zscore_ranking(
     metric: str, score_type: str, top_n: int, ascending: bool

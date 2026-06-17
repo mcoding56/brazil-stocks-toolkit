@@ -30,8 +30,9 @@ from __future__ import annotations
 import logging
 from datetime import date
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
@@ -46,6 +47,33 @@ from brazil_stocks.models.schemas import FundamentalSnapshot
 from brazil_stocks.storage.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# The "Claude Screen" — an opinionated, reliability-weighted composite.
+#
+# Philosophy: weight each pillar by *reliability x durability*. The most
+# persistent, least-manipulable signals (business quality, balance-sheet
+# safety) carry the most weight; the noisiest single-point estimate (the DCF
+# margin of safety) is demoted and winsorised. Every pillar is percentile-
+# ranked to [0, 1] within the surviving cohort *before* weighting, so the
+# weights below literally equal each pillar's maximum contribution.
+# ---------------------------------------------------------------------------
+CLAUDE_WEIGHTS: Dict[str, float] = {
+    "quality": 0.30,    # return on capital, margins — the wonderful-business core
+    "safety": 0.20,     # graded leverage penalty — avoid permanent loss
+    "valuation": 0.20,  # 60% robust peer multiples + 40% capped DCF discount
+    "moat": 0.15,       # durability proxy, kept small to avoid double-counting
+    "growth": 0.15,     # conditioned on ROIC clearing its hurdle
+}
+
+# Inside the valuation pillar, robust peer multiples lead the noisy DCF estimate.
+_CLAUDE_VAL_MULTIPLES_WEIGHT = 0.60
+_CLAUDE_VAL_DCF_WEIGHT = 0.40
+
+# DCF margin of safety is winsorised to this band before ranking, so a single
+# runaway intrinsic-value estimate cannot dominate the screen.
+_CLAUDE_MOS_FLOOR = -0.50
+_CLAUDE_MOS_CAP = 0.90
 
 
 class StockAnalysisOrchestrator:
@@ -667,6 +695,199 @@ class StockAnalysisOrchestrator:
             - out["value_zscore"].fillna(0).clip(-3, 3) / 3.0
         )
         out = out.sort_values("master_score", ascending=False).reset_index(drop=True)
+        return out.head(top_n) if top_n else out
+
+    # ------------------------------------------------------------------ #
+    # The Claude Screen                                                  #
+    # ------------------------------------------------------------------ #
+    def screen_claude(
+        self,
+        weights: Optional[Dict[str, float]] = None,
+        roic_hurdle: float = 10.0,
+        exclude_financials: bool = True,
+        min_liquidity: Optional[float] = None,
+        require_positive_quality: bool = True,
+        min_pillar_coverage: float = 0.50,
+        top_n: int = 30,
+    ) -> pd.DataFrame:
+        """
+        The **Claude Screen** — an opinionated, reliability-weighted composite
+        that improves on ``screen_graham_buffett`` in four ways:
+
+        1. **Intentional weighting.** Every pillar is percentile-ranked to
+           ``[0, 1]`` *within the surviving cohort* before weighting, so the
+           weights in :data:`CLAUDE_WEIGHTS` are the literal maximum
+           contribution of each pillar — no more accidental dominance by
+           whichever column happens to have the widest numeric range.
+        2. **The noisiest signal is demoted.** The single-point DCF margin of
+           safety is winsorised and folded into the *valuation* pillar at 40%,
+           behind robust peer multiples at 60% — instead of carrying full,
+           uncapped weight.
+        3. **Quality and moat are de-correlated.** Return on capital is no
+           longer triple-counted; moat keeps a deliberately small 15% weight.
+        4. **Leverage is a graded penalty, not a gate.** Balance-sheet safety
+           is its own 20% pillar (percentile-ranked inverse net-debt/equity and
+           current ratio), so a lightly levered name scores strictly better than
+           a heavily levered one.
+
+        Growth is additionally *conditioned on ROIC clearing* ``roic_hurdle``:
+        growth without returns above the cost of capital destroys value
+        (Damodaran), so it earns full credit only when the business out-earns
+        its capital and is linearly damped toward zero below the hurdle.
+
+        Pillar weights (see :data:`CLAUDE_WEIGHTS`):
+        quality 30% · safety 20% · valuation 20% · moat 15% · growth 15%.
+
+        Parameters
+        ----------
+        weights : optional override of the pillar weights (keys: ``quality``,
+            ``safety``, ``valuation``, ``moat``, ``growth``). Re-normalised to
+            sum to 1.
+        roic_hurdle : ROIC in Fundamentus percent units (e.g. ``10.0`` = 10%)
+            below which the growth pillar is linearly damped toward zero.
+        exclude_financials : drop banks/insurers (FCFF DCF invalid; default True).
+        min_liquidity : optional floor on 2-month average daily traded volume (BRL).
+        require_positive_quality : drop names with no ``quality_score`` (default True).
+        min_pillar_coverage : drop names whose *available* pillar weights sum to
+            less than this (guards against scoring a stock on one lucky pillar).
+        top_n : number of rows to return (0 = all).
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per qualifying ticker with the per-pillar ``[0, 1]``
+            contributions and the final ``claude_score`` (0-1), sorted desc.
+        """
+        # Resolve & re-normalise weights.
+        w = dict(CLAUDE_WEIGHTS)
+        if weights:
+            w.update({k: float(v) for k, v in weights.items() if k in w})
+        total_w = sum(w.values()) or 1.0
+        w = {k: v / total_w for k, v in w.items()}
+
+        snap_obj = self.zscore_analyzer._latest_snapshot_date()
+        snap = snap_obj.isoformat() if snap_obj else None
+
+        fund = self.db.query(
+            """
+            SELECT f.ticker, s.sector, f.price, f.roic, f.debt_equity,
+                   f.current_ratio, f.liquidity_2m, f.intrinsic_value,
+                   f.margin_of_safety, f.quality_score, f.moat_score
+              FROM fundamental_snapshots f
+              LEFT JOIN stocks s ON s.ticker = f.ticker
+             WHERE f.snapshot_date = ?
+            """,
+            [snap],
+        )
+        if fund.empty:
+            return fund
+
+        # Attach growth_score and a value Z-score composite from zscore_results.
+        zdf = self.db.get_zscore_results(snapshot_date=snap)
+        if not zdf.empty:
+            g = zdf[zdf["metric"] == GROWTH_SCORE_METRIC][["ticker", "cross_sectional_zscore"]]
+            g = g.rename(columns={"cross_sectional_zscore": "growth_score"})
+            v = zdf[zdf["metric"].isin(["pl", "pvp", "ev_ebitda"])]
+            v_pivot = v.pivot_table(
+                index="ticker", columns="metric",
+                values="cross_sectional_zscore", aggfunc="first",
+            )
+            v_pivot["value_zscore"] = v_pivot.mean(axis=1)
+            fund = fund.merge(g, on="ticker", how="left")
+            fund = fund.merge(
+                v_pivot[["value_zscore"]].reset_index(), on="ticker", how="left"
+            )
+        else:
+            fund["growth_score"] = pd.NA
+            fund["value_zscore"] = pd.NA
+
+        # Gates (membership of the peer cohort, not graded).
+        cohort = fund.copy()
+        if exclude_financials:
+            cohort = cohort[~cohort["sector"].apply(_is_financial)]
+        if min_liquidity is not None:
+            cohort = cohort[cohort["liquidity_2m"].fillna(0) >= min_liquidity]
+        if require_positive_quality:
+            cohort = cohort[cohort["quality_score"].notna()]
+        cohort = cohort.reset_index(drop=True)
+        if cohort.empty:
+            return cohort
+
+        # --- Percentile-rank helpers (computed *within* the surviving cohort) ---
+        def _pct(series, invert: bool = False) -> pd.Series:
+            s = pd.to_numeric(series, errors="coerce")
+            r = s.rank(pct=True)            # NaN stays NaN
+            return (1.0 - r) if invert else r
+
+        def _blend(parts: List) -> pd.Series:
+            """Weighted mean of available ranks, ignoring NaN components per row."""
+            num = pd.Series(0.0, index=cohort.index)
+            den = pd.Series(0.0, index=cohort.index)
+            for rank, weight in parts:
+                num = num + (rank * weight).fillna(0.0)
+                den = den + rank.notna().astype(float) * weight
+            return num / den.replace(0.0, np.nan)
+
+        # Pillar 1 — Quality (return on capital, margins): already a percentile.
+        quality_pillar = _pct(cohort["quality_score"])
+
+        # Pillar 2 — Safety (graded leverage): low net-debt/equity, high current ratio.
+        safety_pillar = _blend([
+            (_pct(cohort["debt_equity"], invert=True), 0.75),
+            (_pct(cohort["current_ratio"]), 0.25),
+        ])
+
+        # Pillar 3 — Valuation: robust peer multiples lead the winsorised DCF.
+        mos_capped = pd.to_numeric(cohort["margin_of_safety"], errors="coerce").clip(
+            lower=_CLAUDE_MOS_FLOOR, upper=_CLAUDE_MOS_CAP
+        )
+        valuation_pillar = _blend([
+            (_pct(cohort["value_zscore"], invert=True), _CLAUDE_VAL_MULTIPLES_WEIGHT),
+            (_pct(mos_capped), _CLAUDE_VAL_DCF_WEIGHT),
+        ])
+
+        # Pillar 4 — Moat durability (deliberately small to avoid double-counting).
+        moat_pillar = _pct(cohort["moat_score"])
+
+        # Pillar 5 — Growth, conditioned on ROIC clearing the hurdle.
+        roic_gate = (
+            pd.to_numeric(cohort["roic"], errors="coerce") / float(roic_hurdle)
+        ).clip(lower=0.0, upper=1.0).fillna(0.5)
+        growth_pillar = _pct(cohort["growth_score"]) * roic_gate
+
+        pillars = {
+            "quality": quality_pillar,
+            "safety": safety_pillar,
+            "valuation": valuation_pillar,
+            "moat": moat_pillar,
+            "growth": growth_pillar,
+        }
+
+        # Weighted blend, re-normalised by the weight of the *available* pillars
+        # so a missing input degrades gracefully instead of zeroing the stock.
+        score_num = pd.Series(0.0, index=cohort.index)
+        weight_den = pd.Series(0.0, index=cohort.index)
+        for name, pillar in pillars.items():
+            score_num = score_num + (pillar * w[name]).fillna(0.0)
+            weight_den = weight_den + pillar.notna().astype(float) * w[name]
+
+        cohort = cohort.assign(
+            quality_pillar=quality_pillar.round(4),
+            safety_pillar=safety_pillar.round(4),
+            valuation_pillar=valuation_pillar.round(4),
+            moat_pillar=moat_pillar.round(4),
+            growth_pillar=growth_pillar.round(4),
+            pillar_coverage=weight_den.round(3),
+            claude_score=(score_num / weight_den.replace(0.0, np.nan)).round(4),
+        )
+
+        # Require enough pillar coverage to trust the score.
+        cohort = cohort[cohort["pillar_coverage"] >= min_pillar_coverage]
+        cohort = cohort.dropna(subset=["claude_score"])
+        if cohort.empty:
+            return cohort
+
+        out = cohort.sort_values("claude_score", ascending=False).reset_index(drop=True)
         return out.head(top_n) if top_n else out
 
 

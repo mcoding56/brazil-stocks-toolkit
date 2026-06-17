@@ -29,6 +29,7 @@ The Streamlit app exposes every screen and chart interactively:
 | **Overview** | Database summary, snapshot date, headline top picks, methodology |
 | **Intrinsic Value (DCF)** | Margin-of-safety ranking with liquidity / financials filters |
 | **Master Screen** | Graham-Buffett 7-pillar composite `master_score` |
+| **Claude Screen** | Reliability-weighted composite `claude_score` (percentile-ranked pillars: quality 30 / safety 20 / valuation 20 / moat 15 / growth 15) |
 | **Z-Score Explorer** | Per-metric ranking + cross-ticker heatmap + composite |
 | **Quality & Moat** | Quality vs. moat scatter and scorecard |
 | **GARP** | Value × growth 4-quadrant screen |
