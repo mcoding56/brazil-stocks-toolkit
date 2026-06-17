@@ -381,7 +381,7 @@ def learn_link() -> None:
     """Replace the bulky per-page glossary with a compact link to the Learn page."""
     try:
         st.page_link(
-            "pages/8_Learn.py",
+            "pages/8_📚_Learn.py",
             label="New to these terms? Open the plain-English guide →",
             icon="📚",
         )

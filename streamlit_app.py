@@ -50,22 +50,22 @@ def _q(page: str, label: str, approach: str) -> None:
 
 qcol1, qcol2 = st.columns(2)
 with qcol1:
-    _q("pages/1_Intrinsic_Value.py",
+    _q("pages/1_💰_Fair_Value.py",
        "💰  Is a stock cheaper than it's worth?", "Fair Value · Buffett & Damodaran")
-    _q("pages/2_Master_Screen.py",
+    _q("pages/2_🏆_Quality_Value_Screen.py",
        "🏆  A good business at a fair price?", "Quality-Value Screen · Graham & Buffett")
-    _q("pages/4_Quality_Moat.py",
-       "🛡️  Is it a great, durable business?", "Quality & Moat · Buffett & Greenwald")
-    _q("pages/8_Learn.py",
+    _q("pages/4_🏰_Great_Business.py",
+       "🏰  Is it a great, durable business?", "Quality & Moat · Buffett & Greenwald")
+    _q("pages/8_📚_Learn.py",
        "📚  New here? Read the plain-English guide", "Learn the terms in 2 minutes")
 with qcol2:
-    _q("pages/5_GARP.py",
+    _q("pages/5_🌱_Cheap_and_Growing.py",
        "🌱  Is it cheap AND growing fast?", "GARP · Peter Lynch")
-    _q("pages/3_ZScore_Explorer.py",
+    _q("pages/3_📊_Cheap_vs_History.py",
        "📊  Cheap vs. its own past & its peers?", "Z-Score Explorer · statistics")
-    _q("pages/7_Claude_Screen.py",
+    _q("pages/7_🧠_All_in_One_Ranking.py",
        "🧠  Blend every signal — what wins?", "All-In-One Ranking · multi-factor")
-    _q("pages/6_Stock_Profile.py",
+    _q("pages/6_🔎_Stock_Deep_Dive.py",
        "🔎  Tell me everything about one stock", "One-Stock Deep Dive")
 
 st.divider()
