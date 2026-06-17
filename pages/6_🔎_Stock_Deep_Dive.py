@@ -29,7 +29,14 @@ if not tickers:
     st.stop()
 
 default_idx = tickers.index("PETR4") if "PETR4" in tickers else 0
-ticker = st.sidebar.selectbox("Ticker", tickers, index=default_idx)
+# Offer ticker selection both in sidebar and prominently on the page
+ticker = st.selectbox(
+    "Search and pick a stock ticker:",
+    tickers,
+    index=default_idx,
+    help="943 B3-listed companies. Type to search (e.g. VALE3, WEGE3, ITUB4).",
+)
+st.sidebar.selectbox("Ticker", tickers, index=tickers.index(ticker))
 
 profile = appdata.stock_profile(ticker)
 fund = profile.get("latest_fundamentals", {}) or {}
