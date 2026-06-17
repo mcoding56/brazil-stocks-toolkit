@@ -81,6 +81,10 @@ CREATE TABLE IF NOT EXISTS fundamental_snapshots (
     margin_of_safety  REAL,
     quality_score     REAL,
     moat_score        REAL,
+    momentum_12_1     REAL,
+    momentum_6_1      REAL,
+    volatility_6m     REAL,
+    dist_52w_high     REAL,
     UNIQUE (ticker, snapshot_date)
 );
 
@@ -190,6 +194,7 @@ class DatabaseManager:
             "net_debt_ebitda", "liquidity_2m", "payout", "dividend_cagr_5y",
             "fcf_ttm", "fcf_per_share", "intrinsic_value",
             "margin_of_safety", "quality_score", "moat_score",
+            "momentum_12_1", "momentum_6_1", "volatility_6m", "dist_52w_high",
         ):
             if col not in existing:
                 self._conn.execute(
@@ -294,6 +299,10 @@ class DatabaseManager:
                 s.margin_of_safety,
                 s.quality_score,
                 s.moat_score,
+                s.momentum_12_1,
+                s.momentum_6_1,
+                s.volatility_6m,
+                s.dist_52w_high,
             )
             for s in snapshots
         ]
@@ -307,9 +316,10 @@ class DatabaseManager:
                      net_debt_ebitda, liquidity_2m, dy, payout, dividend_cagr_5y, price,
                      eps_ttm, revenue_ttm, revenue_growth_5y,
                      fcf_ttm, fcf_per_share, intrinsic_value, margin_of_safety,
-                     quality_score, moat_score)
+                     quality_score, moat_score,
+                     momentum_12_1, momentum_6_1, volatility_6m, dist_52w_high)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(ticker, snapshot_date) DO UPDATE SET
                     pl                = COALESCE(excluded.pl, fundamental_snapshots.pl),
                     pvp               = COALESCE(excluded.pvp, fundamental_snapshots.pvp),
@@ -341,7 +351,11 @@ class DatabaseManager:
                     intrinsic_value   = COALESCE(excluded.intrinsic_value, fundamental_snapshots.intrinsic_value),
                     margin_of_safety  = COALESCE(excluded.margin_of_safety, fundamental_snapshots.margin_of_safety),
                     quality_score     = COALESCE(excluded.quality_score, fundamental_snapshots.quality_score),
-                    moat_score        = COALESCE(excluded.moat_score, fundamental_snapshots.moat_score)
+                    moat_score        = COALESCE(excluded.moat_score, fundamental_snapshots.moat_score),
+                    momentum_12_1     = COALESCE(excluded.momentum_12_1, fundamental_snapshots.momentum_12_1),
+                    momentum_6_1      = COALESCE(excluded.momentum_6_1, fundamental_snapshots.momentum_6_1),
+                    volatility_6m     = COALESCE(excluded.volatility_6m, fundamental_snapshots.volatility_6m),
+                    dist_52w_high     = COALESCE(excluded.dist_52w_high, fundamental_snapshots.dist_52w_high)
                 """,
                 rows,
             )

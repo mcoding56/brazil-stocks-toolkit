@@ -41,6 +41,7 @@ from brazil_stocks.analysis.metrics import MetricsCalculator
 from brazil_stocks.analysis.zscore import FUNDAMENTAL_METRICS, ZScoreAnalyzer
 from brazil_stocks.analysis.dcf import DCFValuator
 from brazil_stocks.analysis.quality import QualityScorer
+from brazil_stocks.analysis.factors import FactorAnalyzer
 from brazil_stocks.fetchers.fundamentus import FundamentusFetcher
 from brazil_stocks.fetchers.yfinance_client import YFinanceFetcher
 from brazil_stocks.models.schemas import FundamentalSnapshot
@@ -59,12 +60,17 @@ logger = logging.getLogger(__name__)
 # weights below literally equal each pillar's maximum contribution.
 # ---------------------------------------------------------------------------
 CLAUDE_WEIGHTS: Dict[str, float] = {
-    "quality": 0.30,    # return on capital, margins — the wonderful-business core
-    "safety": 0.20,     # graded leverage penalty — avoid permanent loss
+    "quality": 0.25,    # return on capital, margins — the wonderful-business core
+    "momentum": 0.20,   # 12-1 price momentum + low-vol — the strongest return predictor
     "valuation": 0.20,  # 60% robust peer multiples + 40% capped DCF discount
-    "moat": 0.15,       # durability proxy, kept small to avoid double-counting
-    "growth": 0.15,     # conditioned on ROIC clearing its hurdle
+    "safety": 0.15,     # graded leverage penalty — avoid permanent loss
+    "moat": 0.10,       # durability proxy, kept small to avoid double-counting
+    "growth": 0.10,     # conditioned on ROIC clearing its hurdle
 }
+
+# Inside the momentum pillar, trend leads the low-volatility (betting-against-beta) tilt.
+_CLAUDE_MOM_TREND_WEIGHT = 0.70
+_CLAUDE_MOM_LOWVOL_WEIGHT = 0.30
 
 # Inside the valuation pillar, robust peer multiples lead the noisy DCF estimate.
 _CLAUDE_VAL_MULTIPLES_WEIGHT = 0.60
@@ -120,6 +126,7 @@ class StockAnalysisOrchestrator:
             discount_rate=discount_rate, terminal_growth=terminal_growth
         )
         self.quality_scorer = QualityScorer(self.db)
+        self.factor_analyzer = FactorAnalyzer(self.db)
 
     # ------------------------------------------------------------------
     # Full pipeline
@@ -216,6 +223,11 @@ class StockAnalysisOrchestrator:
         else:
             summary["valuation_rows"] = 0
             summary["quality_rows"] = 0
+
+        # Price-based factors (momentum, low-vol) — cheap, uses stored prices only.
+        n_factor = self.factor_analyzer.compute_and_store()
+        summary["factor_rows"] = n_factor
+        logger.info("  → %d tickers with price factors (momentum/low-vol).", n_factor)
 
         summary["db_summary"] = self.db.summary()
         logger.info("Pipeline complete. DB summary: %s", summary["db_summary"])
@@ -735,8 +747,16 @@ class StockAnalysisOrchestrator:
         (Damodaran), so it earns full credit only when the business out-earns
         its capital and is linearly damped toward zero below the hurdle.
 
+        The **momentum** pillar blends 12-1 price momentum (70%) with a
+        low-volatility tilt (30%, betting-against-beta). It is the strongest
+        standalone return predictor and is negatively correlated with value, so
+        it lifts the whole screen — *provided* price factors have been computed
+        (``FactorAnalyzer.compute_and_store``). If they are missing, the pillar
+        is simply absent and the remaining weights re-normalise.
+
         Pillar weights (see :data:`CLAUDE_WEIGHTS`):
-        quality 30% · safety 20% · valuation 20% · moat 15% · growth 15%.
+        quality 25% · momentum 20% · valuation 20% · safety 15% · moat 10% ·
+        growth 10%.
 
         Parameters
         ----------
@@ -772,7 +792,8 @@ class StockAnalysisOrchestrator:
             """
             SELECT f.ticker, s.sector, f.price, f.roic, f.debt_equity,
                    f.current_ratio, f.liquidity_2m, f.intrinsic_value,
-                   f.margin_of_safety, f.quality_score, f.moat_score
+                   f.margin_of_safety, f.quality_score, f.moat_score,
+                   f.momentum_12_1, f.volatility_6m
               FROM fundamental_snapshots f
               LEFT JOIN stocks s ON s.ticker = f.ticker
              WHERE f.snapshot_date = ?
@@ -855,12 +876,19 @@ class StockAnalysisOrchestrator:
         ).clip(lower=0.0, upper=1.0).fillna(0.5)
         growth_pillar = _pct(cohort["growth_score"]) * roic_gate
 
+        # Pillar 6 — Momentum: 12-1 trend leads, low-volatility tilt follows.
+        momentum_pillar = _blend([
+            (_pct(cohort["momentum_12_1"]), _CLAUDE_MOM_TREND_WEIGHT),
+            (_pct(cohort["volatility_6m"], invert=True), _CLAUDE_MOM_LOWVOL_WEIGHT),
+        ])
+
         pillars = {
             "quality": quality_pillar,
             "safety": safety_pillar,
             "valuation": valuation_pillar,
             "moat": moat_pillar,
             "growth": growth_pillar,
+            "momentum": momentum_pillar,
         }
 
         # Weighted blend, re-normalised by the weight of the *available* pillars
@@ -877,6 +905,7 @@ class StockAnalysisOrchestrator:
             valuation_pillar=valuation_pillar.round(4),
             moat_pillar=moat_pillar.round(4),
             growth_pillar=growth_pillar.round(4),
+            momentum_pillar=momentum_pillar.round(4),
             pillar_coverage=weight_den.round(3),
             claude_score=(score_num / weight_den.replace(0.0, np.nan)).round(4),
         )

@@ -82,6 +82,13 @@ class FundamentalSnapshot:
     quality_score: Optional[float] = None     # Composite quality score (0-1)
     moat_score: Optional[float] = None        # Competitive-advantage proxy (0-1)
 
+    # ---- Price-based factors (populated by FactorAnalyzer from price_history) ----
+    momentum_12_1: Optional[float] = None     # 12-month total return, skipping the last month
+    momentum_6_1: Optional[float] = None      # 6-month total return, skipping the last month
+    volatility_6m: Optional[float] = None     # Annualised realised volatility, trailing ~6 months
+    dist_52w_high: Optional[float] = None      # Price / trailing-52-week high (1.0 = at the high)
+
+
 
 @dataclass
 class PriceBar:

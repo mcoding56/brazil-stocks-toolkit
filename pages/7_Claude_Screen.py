@@ -40,6 +40,12 @@ margin of safety — full, uncapped weight.
 Growth is **conditioned on ROIC clearing its hurdle**: growth without returns above the
 cost of capital destroys value, so it only earns full credit when the business out-earns
 its capital.
+
+**Momentum is now a first-class pillar.** The single most return-predictive factor in the
+academic literature (Jegadeesh-Titman 12-1 trend) was already sitting unused in the price
+history. It blends the 12-month-minus-1 total return (70%) with *low* realised volatility
+(30%, the betting-against-beta effect) — a built-in guard against value traps: a cheap,
+high-quality business the market keeps punishing will score low here.
         """
     )
 
@@ -47,13 +53,15 @@ its capital.
 st.sidebar.header("Pillar weights")
 st.sidebar.caption("Defaults reflect *reliability × durability*. They are re-normalised to 100%.")
 w_quality = st.sidebar.slider("Quality (ROIC, margins)", 0.0, 0.50, CLAUDE_WEIGHTS["quality"], 0.05)
-w_safety = st.sidebar.slider("Safety (low leverage)", 0.0, 0.50, CLAUDE_WEIGHTS["safety"], 0.05)
+w_momentum = st.sidebar.slider("Momentum (12-1 trend, low-vol)", 0.0, 0.50, CLAUDE_WEIGHTS["momentum"], 0.05)
 w_valuation = st.sidebar.slider("Valuation (multiples + DCF)", 0.0, 0.50, CLAUDE_WEIGHTS["valuation"], 0.05)
+w_safety = st.sidebar.slider("Safety (low leverage)", 0.0, 0.50, CLAUDE_WEIGHTS["safety"], 0.05)
 w_moat = st.sidebar.slider("Moat (durability)", 0.0, 0.50, CLAUDE_WEIGHTS["moat"], 0.05)
 w_growth = st.sidebar.slider("Growth (ROIC-conditioned)", 0.0, 0.50, CLAUDE_WEIGHTS["growth"], 0.05)
 
 weights = {
     "quality": w_quality,
+    "momentum": w_momentum,
     "safety": w_safety,
     "valuation": w_valuation,
     "moat": w_moat,
@@ -76,7 +84,7 @@ if total_w <= 0:
 
 # Show the normalised weight mix.
 norm = {k: v / total_w for k, v in weights.items()}
-wcols = st.columns(5)
+wcols = st.columns(len(norm))
 for col, (name, val) in zip(wcols, norm.items()):
     col.metric(name.title(), f"{val:.0%}")
 
@@ -102,9 +110,10 @@ st.plotly_chart(
 )
 
 # ── Stacked pillar-contribution chart (shows *why* each name ranks) ──────────
-pillar_cols = ["quality_pillar", "safety_pillar", "valuation_pillar", "moat_pillar", "growth_pillar"]
+pillar_cols = ["quality_pillar", "momentum_pillar", "safety_pillar", "valuation_pillar", "moat_pillar", "growth_pillar"]
 pillar_labels = {
     "quality_pillar": "Quality",
+    "momentum_pillar": "Momentum",
     "safety_pillar": "Safety",
     "valuation_pillar": "Valuation",
     "moat_pillar": "Moat",
@@ -133,8 +142,9 @@ if all(c in df.columns for c in pillar_cols):
 
 cols = [c for c in [
     "ticker", "sector", "price", "roic", "debt_equity",
+    "momentum_12_1", "volatility_6m",
     "intrinsic_value", "margin_of_safety",
-    "quality_pillar", "safety_pillar", "valuation_pillar",
+    "quality_pillar", "momentum_pillar", "safety_pillar", "valuation_pillar",
     "moat_pillar", "growth_pillar", "claude_score",
 ] if c in df.columns]
 ui.styled_table(df[cols])
