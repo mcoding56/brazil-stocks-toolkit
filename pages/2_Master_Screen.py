@@ -67,4 +67,4 @@ cols = [c for c in ["ticker", "sector", "price", "pl", "pvp", "roic",
                     "debt_equity", "intrinsic_value", "margin_of_safety",
                     "quality_score", "moat_score", "growth_score",
                     "value_zscore", "price_vwap_z", "master_score"] if c in df.columns]
-ui.styled_table(ui.add_verdict(df[cols]))
+ui.styled_table(ui.with_overall_score(ui.add_verdict(df[cols])))

@@ -61,6 +61,15 @@ st.divider()
 # ---------------------------------------------------------------------------
 st.subheader("What the scores mean")
 
+st.markdown(
+    "**⭐ Overall score (0–100)** — the single at-a-glance grade. It blends "
+    "everything below — business quality, price momentum, value, balance-sheet "
+    "safety, moat and growth — into one number, ranked across the whole market. "
+    "Higher is better: a good business bought at a good price. About **50 is "
+    "average** and **70+ is rare**. Use it for a quick read, then look at the "
+    "individual scores to understand *why*."
+)
+
 c1, c2 = st.columns(2)
 with c1:
     st.markdown(

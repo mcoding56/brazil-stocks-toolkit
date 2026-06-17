@@ -157,7 +157,7 @@ cols = [c for c in [
     "moat_pillar", "growth_pillar", "claude_score",
 ] if c in df.columns]
 ui.color_legend("cheap")
-ui.styled_table(ui.add_verdict(df[cols]))
+ui.styled_table(ui.with_overall_score(ui.add_verdict(df[cols])))
 
 # ── Proof: does the momentum pillar actually predict returns? ────────────────
 st.divider()

@@ -875,7 +875,38 @@ class StockAnalysisOrchestrator:
         if cohort.empty:
             return cohort
 
-        # --- Percentile-rank helpers (computed *within* the surviving cohort) ---
+        cohort = self._compute_pillar_scores(cohort, w, roic_hurdle)
+        cohort = cohort.rename(columns={"pillar_score": "claude_score"})
+
+        # Require enough pillar coverage to trust the score.
+        cohort = cohort[cohort["pillar_coverage"] >= min_pillar_coverage]
+        cohort = cohort.dropna(subset=["claude_score"])
+        if cohort.empty:
+            return cohort
+
+        out = cohort.sort_values("claude_score", ascending=False).reset_index(drop=True)
+        return out.head(top_n) if top_n else out
+
+    # ------------------------------------------------------------------ #
+    # Shared pillar engine + the universal Overall Score                 #
+    # ------------------------------------------------------------------ #
+    def _compute_pillar_scores(
+        self,
+        cohort: pd.DataFrame,
+        weights: Dict[str, float],
+        roic_hurdle: float,
+    ) -> pd.DataFrame:
+        """Percentile-rank the six pillars *within the rows of* ``cohort`` and
+        blend them into a single 0–1 score.
+
+        Returns ``cohort`` augmented with the six ``*_pillar`` columns,
+        ``pillar_coverage`` (the summed weight of the pillars that were
+        available for each row) and ``pillar_score`` (the weighted mean of the
+        available pillars, re-normalised so a missing input degrades gracefully
+        instead of zeroing the stock). The caller controls the peer group by
+        choosing which rows to pass in — both the gated Claude screen and the
+        ungated Overall Score share this engine so the two stay consistent.
+        """
         def _pct(series, invert: bool = False) -> pd.Series:
             s = pd.to_numeric(series, errors="coerce")
             r = s.rank(pct=True)            # NaN stays NaN
@@ -939,10 +970,10 @@ class StockAnalysisOrchestrator:
         score_num = pd.Series(0.0, index=cohort.index)
         weight_den = pd.Series(0.0, index=cohort.index)
         for name, pillar in pillars.items():
-            score_num = score_num + (pillar * w[name]).fillna(0.0)
-            weight_den = weight_den + pillar.notna().astype(float) * w[name]
+            score_num = score_num + (pillar * weights[name]).fillna(0.0)
+            weight_den = weight_den + pillar.notna().astype(float) * weights[name]
 
-        cohort = cohort.assign(
+        return cohort.assign(
             quality_pillar=quality_pillar.round(4),
             safety_pillar=safety_pillar.round(4),
             valuation_pillar=valuation_pillar.round(4),
@@ -950,17 +981,110 @@ class StockAnalysisOrchestrator:
             growth_pillar=growth_pillar.round(4),
             momentum_pillar=momentum_pillar.round(4),
             pillar_coverage=weight_den.round(3),
-            claude_score=(score_num / weight_den.replace(0.0, np.nan)).round(4),
+            pillar_score=(score_num / weight_den.replace(0.0, np.nan)).round(4),
         )
 
-        # Require enough pillar coverage to trust the score.
-        cohort = cohort[cohort["pillar_coverage"] >= min_pillar_coverage]
-        cohort = cohort.dropna(subset=["claude_score"])
-        if cohort.empty:
-            return cohort
+    def overall_scores(
+        self,
+        exclude_financials: bool = False,
+        min_liquidity: Optional[float] = None,
+        min_pillar_coverage: float = 0.40,
+    ) -> pd.DataFrame:
+        """Compute one **universal Overall Score (0–100)** for every stock.
 
-        out = cohort.sort_values("claude_score", ascending=False).reset_index(drop=True)
-        return out.head(top_n) if top_n else out
+        This is the single, at-a-glance grade that summarises how attractive a
+        company looks *overall* — it blends the same six reliability-weighted
+        pillars as the Claude Screen (quality, momentum, valuation, safety,
+        moat, growth) but is computed **without any gates** so every name in the
+        latest snapshot gets a comparable rank, not just the screen survivors.
+
+        Each pillar is percentile-ranked across the whole universe, weighted by
+        :data:`CLAUDE_WEIGHTS`, and the 0–1 blend is rescaled to 0–100 where a
+        higher number means a better all-round business at a better price.
+
+        Parameters
+        ----------
+        exclude_financials : drop banks/insurers from the ranked universe
+            (default ``False`` — financials still get a score, ranked on the
+            signals that apply to them).
+        min_liquidity : optional floor on 2-month average daily volume (BRL) for
+            *inclusion in the ranked universe*.
+        min_pillar_coverage : drop names whose available pillar weights sum to
+            less than this, so a stock is never graded on one lucky signal.
+
+        Returns
+        -------
+        pd.DataFrame
+            Columns ``ticker``, ``sector``, the six ``*_pillar`` contributions,
+            ``pillar_coverage`` and ``overall_score`` (0–100), sorted desc.
+            Empty if no snapshot is available.
+        """
+        snap_obj = self.zscore_analyzer._latest_snapshot_date()
+        snap = snap_obj.isoformat() if snap_obj else None
+        if snap is None:
+            return pd.DataFrame()
+
+        fund = self.db.query(
+            """
+            SELECT f.ticker, s.sector, f.price, f.roic, f.debt_equity,
+                   f.current_ratio, f.liquidity_2m, f.intrinsic_value,
+                   f.margin_of_safety, f.quality_score, f.moat_score,
+                   f.momentum_12_1, f.volatility_6m
+              FROM fundamental_snapshots f
+              LEFT JOIN stocks s ON s.ticker = f.ticker
+             WHERE f.snapshot_date = ?
+            """,
+            [snap],
+        )
+        if fund.empty:
+            return fund
+
+        # Attach growth_score, a value-multiple Z-score composite and the
+        # price-vs-VWAP cheapness signal (same inputs the Claude screen uses).
+        zdf = self.db.get_zscore_results(snapshot_date=snap)
+        if not zdf.empty:
+            g = zdf[zdf["metric"] == GROWTH_SCORE_METRIC][["ticker", "cross_sectional_zscore"]]
+            g = g.rename(columns={"cross_sectional_zscore": "growth_score"})
+            v = zdf[zdf["metric"].isin(["pl", "pvp", "ev_ebitda"])]
+            v_pivot = v.pivot_table(
+                index="ticker", columns="metric",
+                values="cross_sectional_zscore", aggfunc="first",
+            )
+            v_pivot["value_zscore"] = v_pivot.mean(axis=1)
+            fund = fund.merge(g, on="ticker", how="left")
+            fund = fund.merge(
+                v_pivot[["value_zscore"]].reset_index(), on="ticker", how="left"
+            )
+            pz = zdf[zdf["metric"] == PRICE_METRIC][["ticker", "time_series_zscore"]]
+            pz = pz.rename(columns={"time_series_zscore": "price_vwap_z"})
+            fund = fund.merge(pz, on="ticker", how="left")
+        else:
+            fund["growth_score"] = pd.NA
+            fund["value_zscore"] = pd.NA
+            fund["price_vwap_z"] = pd.NA
+
+        universe = fund.copy()
+        if exclude_financials:
+            universe = universe[~universe["sector"].apply(_is_financial)]
+        if min_liquidity is not None:
+            universe = universe[universe["liquidity_2m"].fillna(0) >= min_liquidity]
+        universe = universe[universe["quality_score"].notna()]
+        universe = universe.reset_index(drop=True)
+        if universe.empty:
+            return universe
+
+        scored = self._compute_pillar_scores(universe, dict(CLAUDE_WEIGHTS), 10.0)
+        scored = scored[scored["pillar_coverage"] >= min_pillar_coverage]
+        scored = scored.dropna(subset=["pillar_score"])
+        if scored.empty:
+            return scored
+
+        scored["overall_score"] = (scored["pillar_score"] * 100).round(1)
+        cols = ["ticker", "sector", "quality_pillar", "safety_pillar",
+                "valuation_pillar", "moat_pillar", "growth_pillar",
+                "momentum_pillar", "pillar_coverage", "overall_score"]
+        out = scored[cols].sort_values("overall_score", ascending=False)
+        return out.reset_index(drop=True)
 
 
 def _to_float(value) -> Optional[float]:

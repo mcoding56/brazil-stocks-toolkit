@@ -144,6 +144,21 @@ def claude_screen(
     return df.head(top_n) if top_n else df
 
 
+@st.cache_data(show_spinner="Scoring every stock…")
+def overall_scores(min_liquidity: Optional[float] = None) -> pd.DataFrame:
+    """Universal 0–100 Overall Score for every stock in the latest snapshot."""
+    return get_orchestrator().overall_scores(min_liquidity=min_liquidity)
+
+
+@st.cache_data(show_spinner=False)
+def overall_score_map(min_liquidity: Optional[float] = None) -> dict[str, float]:
+    """Ticker → Overall Score (0–100) lookup, for attaching to any table."""
+    df = overall_scores(min_liquidity=min_liquidity)
+    if df.empty or "overall_score" not in df.columns:
+        return {}
+    return dict(zip(df["ticker"], df["overall_score"]))
+
+
 @st.cache_data(show_spinner="Backtesting momentum…")
 def momentum_backtest(
     n_quantiles: int = 3, min_dollar_vol: float = 5_000_000.0

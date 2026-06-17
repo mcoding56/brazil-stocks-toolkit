@@ -39,7 +39,7 @@ tab_metric, tab_heatmap, tab_composite = st.tabs(
 with tab_metric:
     metric = st.selectbox(
         "Metric",
-        list(ui.METRIC_LABELS.keys()),
+        ui.ZSCORE_METRICS,
         format_func=lambda m: ui.METRIC_LABELS.get(m, m),
     )
     ui.metric_explainer(metric)
@@ -63,7 +63,7 @@ with tab_metric:
 
 with tab_heatmap:
     matrix = appdata.heatmap_data(
-        metrics=list(ui.METRIC_LABELS.keys()), score_type=score_type, top_n=top_n
+        metrics=ui.ZSCORE_METRICS, score_type=score_type, top_n=top_n
     )
     if matrix.empty:
         st.info("Not enough data to build a heatmap.")
@@ -87,4 +87,4 @@ with tab_composite:
             ),
             use_container_width=True,
         )
-        ui.styled_table(comp.head(top_n))
+        ui.styled_table(ui.with_overall_score(comp.head(top_n)))

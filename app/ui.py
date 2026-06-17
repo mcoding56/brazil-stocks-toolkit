@@ -7,6 +7,7 @@ import streamlit as st
 from app import data as appdata
 
 METRIC_LABELS: dict[str, str] = {
+    "overall_score": "Overall score (0–100)",
     "pl": "P/L (P/E)",
     "pvp": "P/VP (P/B)",
     "ev_ebitda": "EV/EBITDA",
@@ -23,6 +24,10 @@ METRIC_LABELS: dict[str, str] = {
     "current_ratio": "Current ratio",
     "price_vwap_z": "Price vs. VWAP (cheapness)",
 }
+
+# The metric keys that have z-score results (everything in METRIC_LABELS except
+# the composite ``overall_score``, which is a blended grade, not a z-scored metric).
+ZSCORE_METRICS: list[str] = [k for k in METRIC_LABELS if k != "overall_score"]
 
 # Metrics where a *lower* reading is cheaper/better (used to set sort direction).
 LOWER_IS_CHEAPER = frozenset(
@@ -157,6 +162,14 @@ METRIC_INFO: dict[str, tuple[str, str]] = {
         "Proximity to the one-year high (1.0 = sitting at the high).",
     ),
     # --- Composite scores ---
+    "overall_score": (
+        "Weighted blend of six percentile-ranked pillars — quality 25, momentum "
+        "20, valuation 20, safety 15, moat 10, growth 10 — rescaled to 0–100",
+        "The single at-a-glance grade for a stock. It rolls the whole dashboard "
+        "into one number: a good business (high returns, low debt, a moat, "
+        "steady growth, positive trend) bought at a good price scores high. "
+        "Ranked across the whole market, so ~50 is average and 70+ is rare.",
+    ),
     "quality_score": (
         "Weighted % rank of ROIC (25), net margin (15), ROE (15), gross "
         "margin (15), EBIT margin (10), low net-debt/equity (12), current "
@@ -208,7 +221,7 @@ METRIC_GROUPS: list[tuple[str, list[str]]] = [
     ("Price factors (momentum & risk)",
      ["momentum_12_1", "momentum_6_1", "volatility_6m", "dist_52w_high"]),
     ("Composite scores & valuation",
-     ["quality_score", "moat_score", "margin_of_safety", "intrinsic_value"]),
+     ["overall_score", "quality_score", "moat_score", "margin_of_safety", "intrinsic_value"]),
     ("Z-score conventions",
      ["time_series_zscore", "cross_sectional_zscore"]),
 ]
@@ -251,6 +264,8 @@ def styled_table(df: pd.DataFrame, percent_cols: set[str] | None = None) -> None
         # Quality/moat/margin-of-safety are 0–1 fractions → show as %.
         if col in {"margin_of_safety", "quality_score", "moat_score"}:
             fmt[col] = "{:.1%}"
+        elif col == "overall_score":
+            fmt[col] = "{:.0f}"
         elif col in pct:
             fmt[col] = "{:.1f}"
         elif col in {"liquidity_2m"}:
@@ -433,4 +448,28 @@ def add_verdict(df: pd.DataFrame) -> pd.DataFrame:
     verdict = [_verdict(cheap.iloc[i], strong.iloc[i]) for i in range(n)]
     out = df.copy()
     out.insert(0, "Verdict", verdict)
+    return out
+
+
+def with_overall_score(df: pd.DataFrame, min_liquidity: float | None = None) -> pd.DataFrame:
+    """Attach the universal 0–100 ``overall_score`` column to any table by ticker.
+
+    Looks each row's ticker up in the market-wide Overall Score and inserts the
+    column right after ``Verdict`` (or first, if there is no verdict). A no-op
+    when the frame has no ``ticker`` column or the score map is empty, so it is
+    safe to wrap around every screen result.
+    """
+    if df is None or df.empty or "ticker" not in df.columns:
+        return df
+    scores = appdata.overall_score_map(min_liquidity)
+    if not scores:
+        return df
+    vals = pd.to_numeric(df["ticker"].map(scores), errors="coerce")
+    if vals.notna().sum() == 0:
+        return df
+    out = df.copy()
+    if "overall_score" in out.columns:
+        out = out.drop(columns=["overall_score"])
+    pos = 1 if "Verdict" in out.columns else 0
+    out.insert(pos, "overall_score", vals.round(0))
     return out

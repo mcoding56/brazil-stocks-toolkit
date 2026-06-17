@@ -42,10 +42,17 @@ def _num(key: str):
     return v if isinstance(v, (int, float)) and pd.notna(v) else None
 
 
-c1, c2, c3, c4 = st.columns(4)
+c0, c1, c2, c3, c4 = st.columns(5)
 price = _num("price")
 iv = _num("intrinsic_value")
 mos = _num("margin_of_safety")
+overall = appdata.overall_score_map().get(ticker)
+c0.metric(
+    "Overall score",
+    f"{overall:.0f} / 100" if overall is not None else "—",
+    help="The single 0–100 grade blending quality, momentum, value, safety, "
+         "moat and growth across the whole market. ~50 is average, 70+ is rare.",
+)
 c1.metric("Price", f"R$ {price:,.2f}" if price is not None else "—")
 c2.metric("Intrinsic value", f"R$ {iv:,.2f}" if iv is not None else "—")
 c3.metric("Margin of safety", f"{mos:.1%}" if mos is not None else "—")
