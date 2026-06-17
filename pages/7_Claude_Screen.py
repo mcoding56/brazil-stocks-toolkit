@@ -61,7 +61,7 @@ weights = {
 }
 
 st.sidebar.header("Gates")
-top_n = st.sidebar.slider("Show top N", 5, 60, 20, step=5)
+top_n = st.sidebar.slider("Show top N", 5, 200, 30, step=5)
 roic_hurdle = st.sidebar.slider(
     "ROIC hurdle (%)", 0.0, 25.0, 10.0, step=1.0,
     help="Growth is damped toward zero below this ROIC (the cost-of-capital proxy).",
