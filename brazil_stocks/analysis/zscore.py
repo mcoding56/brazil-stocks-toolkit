@@ -365,11 +365,23 @@ class ZScoreAnalyzer:
                     continue
                 current = current_row.iloc[0][metric]
 
+                # A non-positive valuation ratio (e.g. a negative P/E driven by
+                # losses) is *undefined*, not "cheap" — skip it rather than
+                # scoring it at the -cap and flooding the cheap end of the rank.
+                if metric in _POSITIVE_ONLY_METRICS and current <= 0:
+                    result[metric][ticker] = None
+                    continue
+
                 # Winsorize the reference distribution to suppress historical outliers
                 lo = series.quantile(self.winsorize_pct)
                 hi = series.quantile(1.0 - self.winsorize_pct)
                 series_w = series.clip(lo, hi)
-                z = _zscore(current, series_w.mean(), series_w.std())
+                # Positive-only valuation ratios keep their raw value so the
+                # cheapest names stay rank-distinct; other metrics (ROE, margins,
+                # leverage) can carry two-sided data-artifact outliers, so the
+                # scored value is winsorized to avoid pinning to the ±cap.
+                scored = current if metric in _POSITIVE_ONLY_METRICS else min(max(current, lo), hi)
+                z = _zscore(scored, series_w.mean(), series_w.std())
                 if z is not None:
                     z = max(-self.zscore_cap, min(self.zscore_cap, z))
                 result[metric][ticker] = z
@@ -412,7 +424,12 @@ class ZScoreAnalyzer:
                     hi = group_vals.quantile(1.0 - self.winsorize_pct)
                     group_w = group_vals.clip(lo, hi)
                     current = row.iloc[0][metric]
-                    z = _zscore(current, group_w.mean(), group_w.std())
+                    # Non-positive valuation ratios are undefined, not cheap.
+                    if metric in _POSITIVE_ONLY_METRICS and current <= 0:
+                        result[metric][ticker] = None
+                        continue
+                    scored = current if metric in _POSITIVE_ONLY_METRICS else min(max(current, lo), hi)
+                    z = _zscore(scored, group_w.mean(), group_w.std())
                     if z is not None:
                         z = max(-self.zscore_cap, min(self.zscore_cap, z))
                     result[metric][ticker] = z
@@ -428,7 +445,12 @@ class ZScoreAnalyzer:
                         result[metric][ticker] = None
                         continue
                     current = row.iloc[0][metric]
-                    z = _zscore(current, mu, sigma)
+                    # Non-positive valuation ratios are undefined, not cheap.
+                    if metric in _POSITIVE_ONLY_METRICS and current <= 0:
+                        result[metric][ticker] = None
+                        continue
+                    scored = current if metric in _POSITIVE_ONLY_METRICS else min(max(current, lo), hi)
+                    z = _zscore(scored, mu, sigma)
                     if z is not None:
                         z = max(-self.zscore_cap, min(self.zscore_cap, z))
                     result[metric][ticker] = z
