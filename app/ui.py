@@ -21,11 +21,13 @@ METRIC_LABELS: dict[str, str] = {
     "net_margin": "Net margin",
     "debt_equity": "Net debt / equity",
     "current_ratio": "Current ratio",
+    "price_vwap_z": "Price vs. VWAP (cheapness)",
 }
 
 # Metrics where a *lower* reading is cheaper/better (used to set sort direction).
 LOWER_IS_CHEAPER = frozenset(
-    ["pl", "pvp", "ev_ebitda", "ev_ebit", "p_ebit", "ps", "debt_equity"]
+    ["pl", "pvp", "ev_ebitda", "ev_ebit", "p_ebit", "ps", "debt_equity",
+     "price_vwap_z"]
 )
 
 # Plain-language definition + formula for every metric surfaced in the dashboard.
@@ -102,6 +104,15 @@ METRIC_INFO: dict[str, tuple[str, str]] = {
         "Current assets ÷ current liabilities",
         "Short-term liquidity. Above 1.0 means near-term assets cover near-term "
         "bills.",
+    ),
+    # --- Price cheapness ---
+    "price_vwap_z": (
+        "(recent volume-weighted price − 2-year VWAP) ÷ price std. dev.",
+        "How cheap the share price is versus where it has actually traded. The "
+        "reference is the volume-weighted average price (VWAP) over the trailing "
+        "~2 years; the 'current' value is the VWAP of the last ~21 sessions. "
+        "Negative = trading below its own VWAP (a mean-reversion cheap signal); "
+        "positive = extended above it.",
     ),
     # --- Growth ---
     "eps_yoy": (
@@ -189,6 +200,8 @@ METRIC_GROUPS: list[tuple[str, list[str]]] = [
      ["roe", "roic", "gross_margin", "ebit_margin", "net_margin"]),
     ("Balance-sheet safety",
      ["debt_equity", "current_ratio"]),
+    ("Price cheapness",
+     ["price_vwap_z"]),
     ("Growth",
      ["eps_yoy", "eps_slope", "positive_qtr_ratio", "revenue_growth_5y",
       "growth_score"]),

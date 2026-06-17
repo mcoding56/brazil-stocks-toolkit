@@ -49,6 +49,14 @@ FUNDAMENTAL_METRICS = [
 # we filter to positive values before computing the reference distribution.
 _POSITIVE_ONLY_METRICS = frozenset(["pl", "pvp", "ev_ebitda", "ev_ebit", "p_ebit", "ps", "dy"])
 
+# Price-based z-score derived from the OHLCV history (not the fundamental
+# snapshots). It asks: *is the price cheap relative to where it has recently
+# traded, on a volume-weighted basis?* A negative score means the recent
+# volume-weighted price sits below the trailing-window VWAP — a mean-reversion
+# "cheap" signal. Stored as a time-series score only (a cross-sectional price
+# z-score is meaningless because absolute price levels differ across tickers).
+PRICE_METRIC = "price_vwap_z"
+
 
 class ZScoreAnalyzer:
     """
@@ -71,12 +79,18 @@ class ZScoreAnalyzer:
         min_observations: int = 20,
         winsorize_pct: float = 0.05,
         zscore_cap: float = 5.0,
+        price_window_years: float = 2.0,
+        price_min_observations: int = 60,
+        price_vwap_window: int = 21,
     ) -> None:
         self.db = db
         self.window_years = window_years
         self.min_observations = min_observations
         self.winsorize_pct = winsorize_pct   # clip to [p, 1-p] before computing stats
         self.zscore_cap = zscore_cap         # hard cap on final |z|
+        self.price_window_years = price_window_years      # lookback for the price VWAP z
+        self.price_min_observations = price_min_observations  # min daily bars required
+        self.price_vwap_window = price_vwap_window         # trailing days for the "current" VWAP
 
     # ------------------------------------------------------------------
     # High-level pipeline
@@ -119,9 +133,16 @@ class ZScoreAnalyzer:
             snap_df, metrics, group_by_sector=group_by_sector
         )
 
+        # Price-based VWAP z-score (time-series only). Computed from the OHLCV
+        # history rather than the fundamental snapshots.
+        price_scores = self._compute_price_scores(snap_df)
+        ts_scores[PRICE_METRIC] = price_scores
+        cs_scores[PRICE_METRIC] = {}
+        merge_metrics = [*metrics, PRICE_METRIC]
+
         # --- Merge results --------------------------------------------
         results = self._merge_scores(
-            snap_df, ts_scores, cs_scores, snapshot_date, metrics
+            snap_df, ts_scores, cs_scores, snapshot_date, merge_metrics
         )
 
         # --- Persist --------------------------------------------------
@@ -454,6 +475,76 @@ class ZScoreAnalyzer:
                     if z is not None:
                         z = max(-self.zscore_cap, min(self.zscore_cap, z))
                     result[metric][ticker] = z
+        return result
+
+    def _compute_price_scores(
+        self, snap_df: pd.DataFrame
+    ) -> Dict[str, Optional[float]]:
+        """Time-series VWAP z-score per ticker from the OHLCV history.
+
+        For each ticker we build a daily *typical price* ``(high+low+close)/3``
+        over the trailing ``price_window_years`` window, take its
+        volume-weighted mean (VWAP) as the reference centre and its standard
+        deviation as the scale, then z-score the recent volume-weighted price
+        (last ``price_vwap_window`` bars). Negative ⇒ trading below its recent
+        VWAP (cheap); positive ⇒ extended above it.
+        """
+        result: Dict[str, Optional[float]] = {}
+        tickers = snap_df["ticker"].tolist()
+
+        start_date = (
+            date.today() - timedelta(days=int(self.price_window_years * 365.25))
+        ).isoformat()
+        hist = self.db.query(
+            "SELECT ticker, date, high, low, close, volume "
+            "FROM price_history WHERE date >= ? ORDER BY ticker, date",
+            [start_date],
+        )
+        if hist.empty:
+            return {t: None for t in tickers}
+
+        # Typical price; fall back to close when high/low are missing.
+        tp = (hist["high"] + hist["low"] + hist["close"]) / 3.0
+        hist = hist.assign(_tp=tp.where(tp.notna(), hist["close"]))
+        grouped = hist.dropna(subset=["_tp"]).groupby("ticker")
+
+        for ticker in tickers:
+            if ticker not in grouped.groups:
+                result[ticker] = None
+                continue
+            g = grouped.get_group(ticker)
+            prices = g["_tp"].to_numpy(dtype=float)
+            vols = g["volume"].to_numpy(dtype=float)
+            if prices.size < self.price_min_observations:
+                result[ticker] = None
+                continue
+
+            # Volume-weighted reference (VWAP); fall back to simple mean when
+            # volume is unavailable/zero.
+            w = np.nan_to_num(vols, nan=0.0)
+            w = np.where(w < 0, 0.0, w)
+            vwap = (
+                float(np.average(prices, weights=w))
+                if w.sum() > 0
+                else float(prices.mean())
+            )
+            sigma = float(prices.std(ddof=1)) if prices.size > 1 else 0.0
+            if sigma < 1e-10:
+                result[ticker] = None
+                continue
+
+            # "Current" price = recent volume-weighted average (last N bars),
+            # smoothing single-day noise.
+            tail_p = prices[-self.price_vwap_window:]
+            tail_w = w[-self.price_vwap_window:]
+            current = (
+                float(np.average(tail_p, weights=tail_w))
+                if tail_w.sum() > 0
+                else float(tail_p.mean())
+            )
+
+            z = (current - vwap) / sigma
+            result[ticker] = max(-self.zscore_cap, min(self.zscore_cap, z))
         return result
 
     def _merge_scores(
