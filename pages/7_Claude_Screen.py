@@ -145,7 +145,7 @@ if all(c in df.columns for c in pillar_cols):
 cols = [c for c in [
     "ticker", "sector", "price", "roic", "debt_equity",
     "momentum_12_1", "volatility_6m",
-    "intrinsic_value", "margin_of_safety",
+    "intrinsic_value", "margin_of_safety", "price_vwap_z",
     "quality_pillar", "momentum_pillar", "safety_pillar", "valuation_pillar",
     "moat_pillar", "growth_pillar", "claude_score",
 ] if c in df.columns]
