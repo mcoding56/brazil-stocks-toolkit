@@ -10,6 +10,7 @@ import streamlit as st
 
 from app import data as appdata
 from app import ui
+from brazil_stocks.orchestrator import StockAnalysisOrchestrator
 
 st.set_page_config(
     page_title="Brazil Stocks — Value Dashboard",
@@ -17,6 +18,30 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Sidebar: refresh control
+with st.sidebar:
+    st.divider()
+    with st.expander("🔄 Refresh dataset", expanded=False):
+        st.caption(
+            "Fetch the latest fundamentals, prices and compute all scores. "
+            "Takes 5–10 minutes."
+        )
+        if st.button("Update now", key="refresh_btn", use_container_width=True):
+            with st.spinner("Fetching and computing… (this may take 5–10 minutes)"):
+                try:
+                    orc = StockAnalysisOrchestrator(db_path=appdata.db_path())
+                    n = orc.run_full_pipeline(tickers=None)
+                    st.success(
+                        f"✅ Pipeline complete: {n} tickers processed. "
+                        "Refresh the page to see updated data."
+                    )
+                    # Clear caches so next page load sees fresh data
+                    st.cache_data.clear()
+                    st.cache_resource.clear()
+                except Exception as e:
+                    st.error(f"❌ Pipeline failed: {e}")
+    st.divider()
 
 ui.page_header(
     "🇧🇷 Brazil Stocks — find good companies at good prices",
