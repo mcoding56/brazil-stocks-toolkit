@@ -43,6 +43,11 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
+The home page shows the latest snapshot date and a refresh panel. On Streamlit
+Community Cloud, the refresh button updates the running app instance. If you want
+the committed dashboard data to stay fresh between restarts, run a scheduled
+GitHub Action that rebuilds and commits `data/brazil_stocks_slim.db`.
+
 ### Regenerate the slim database (optional)
 
 The app ships with a pre-built read-only `data/brazil_stocks_slim.db`. To rebuild it
@@ -65,7 +70,9 @@ orc.screen_graham_buffett(min_margin_of_safety=0.2)   # master quality-value scr
 ```
 
 A full B3 refresh (`orc.update_database()`) fetches ~940 equities plus prices and is
-slow (15–30 min); it is intentionally **not** triggered from the web app.
+slow (15–30 min). The web app exposes a manual refresh button for the running
+Streamlit instance, but the durable way to keep Streamlit Cloud up to date is a
+scheduled rebuild of the committed slim database.
 
 ## Deploy free on Streamlit Community Cloud
 

@@ -6,6 +6,8 @@ Run locally with::
 """
 from __future__ import annotations
 
+from datetime import date
+
 import streamlit as st
 
 from app import data as appdata
@@ -19,26 +21,58 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+def _snapshot_age_days(snapshot: str | None) -> int | None:
+    if not snapshot:
+        return None
+    try:
+        return (date.today() - date.fromisoformat(snapshot)).days
+    except ValueError:
+        return None
+
+
+latest_snapshot = appdata.latest_snapshot_date()
+snapshot_age_days = _snapshot_age_days(latest_snapshot)
+is_stale = snapshot_age_days is None or snapshot_age_days >= 1
+
+if msg := st.session_state.pop("refresh_notice", None):
+    st.success(msg)
+
+st.caption(
+    f"Last dataset snapshot: {latest_snapshot or 'unknown'}"
+    + (
+        f" · {snapshot_age_days} day(s) old"
+        if snapshot_age_days is not None
+        else " · freshness unknown"
+    )
+)
+
+if is_stale:
+    st.warning(
+        "This dataset is older than a day. Open the refresh panel below to update "
+        "the running Streamlit Cloud instance."
+    )
+
 # Sidebar: refresh control
 with st.sidebar:
     st.divider()
-    with st.expander("🔄 Refresh dataset", expanded=False):
+    with st.expander("🔄 Refresh dataset", expanded=is_stale):
         st.caption(
-            "Fetch the latest fundamentals, prices and compute all scores. "
-            "Takes 5–10 minutes."
+            "Fetch the latest fundamentals, prices and scores. On Streamlit Cloud, "
+            "this updates the live app instance; for a durable daily refresh, use a "
+            "scheduled GitHub Action to rebuild and commit the slim DB."
         )
         if st.button("Update now", key="refresh_btn", use_container_width=True):
             with st.spinner("Fetching and computing… (this may take 5–10 minutes)"):
                 try:
                     orc = StockAnalysisOrchestrator(db_path=appdata.db_path())
-                    n = orc.run_full_pipeline(tickers=None)
-                    st.success(
-                        f"✅ Pipeline complete: {n} tickers processed. "
-                        "Refresh the page to see updated data."
+                    summary = orc.update_database(backup=False)
+                    st.session_state["refresh_notice"] = (
+                        f"✅ Dataset refreshed: {summary.get('db_summary', {}).get('fundamental_snapshots', 0):,} "
+                        "snapshot rows available."
                     )
-                    # Clear caches so next page load sees fresh data
                     st.cache_data.clear()
                     st.cache_resource.clear()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"❌ Pipeline failed: {e}")
     st.divider()
