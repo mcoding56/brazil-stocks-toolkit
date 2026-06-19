@@ -203,6 +203,7 @@ class StockAnalysisOrchestrator:
         # Determine universe
         universe = tickers or [s.ticker for s in stocks]
         summary["universe_size"] = len(universe)
+        active_universe = list(dict.fromkeys(universe))
 
         # Step 3: Fetch price history
         if fetch_prices:
@@ -214,17 +215,30 @@ class StockAnalysisOrchestrator:
             price_bars = self.yf.to_price_bars(price_df)
             n_bars = self.db.upsert_price_bars(price_bars)
             summary["price_bars_stored"] = n_bars
+            if not price_df.empty and "ticker" in price_df.columns:
+                active_universe = sorted(price_df["ticker"].dropna().astype(str).unique().tolist())
+            else:
+                active_universe = []
+            summary["tickers_with_prices"] = len(active_universe)
+            summary["tickers_without_prices"] = max(0, len(set(universe)) - len(set(active_universe)))
             logger.info("  → %d price bars stored.", n_bars)
+            if summary["tickers_without_prices"]:
+                logger.info(
+                    "  → skipped %d tickers with no price history in this run.",
+                    summary["tickers_without_prices"],
+                )
         else:
             summary["price_bars_stored"] = 0
+            summary["tickers_with_prices"] = len(active_universe)
+            summary["tickers_without_prices"] = 0
 
         # Step 4: Compute historical metrics
         if compute_historical_metrics:
             logger.info(
                 "Step 3/5 — Computing historical metrics for %d tickers …",
-                len(universe),
+                len(active_universe),
             )
-            n_hist = self.metrics_calc.compute_and_store(universe)
+            n_hist = self.metrics_calc.compute_and_store(active_universe)
             summary["historical_metric_rows"] = n_hist
             logger.info("  → %d historical metric rows stored.", n_hist)
         else:
@@ -241,7 +255,7 @@ class StockAnalysisOrchestrator:
             logger.info(
                 "Step 5/5 — Computing FCF, DCF intrinsic value & quality scores …"
             )
-            n_val = self.compute_valuation_metrics(universe)
+            n_val = self.compute_valuation_metrics(active_universe)
             n_qual = self.quality_scorer.compute_and_store()
             summary["valuation_rows"] = n_val
             summary["quality_rows"] = n_qual
@@ -575,15 +589,25 @@ class StockAnalysisOrchestrator:
         """
         Fetch prices in batches with a tqdm progress bar.
         """
+        tickers = list(dict.fromkeys(tickers))
         batch_size = self.yf.batch_size
         batches = [
             tickers[i : i + batch_size] for i in range(0, len(tickers), batch_size)
         ]
         frames = []
+        fetched_tickers: set[str] = set()
         for batch in tqdm(batches, desc="Fetching prices", unit="batch"):
             df = self.yf.fetch_prices(batch, period=period)
             if not df.empty:
                 frames.append(df)
+                fetched_tickers.update(df["ticker"].dropna().astype(str).unique().tolist())
+        if fetched_tickers:
+            missing = [t for t in tickers if t not in fetched_tickers]
+            if missing:
+                logger.debug(
+                    "Tickers without price data in this fetch (showing up to 25): %s",
+                    missing[:25],
+                )
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
     # ------------------------------------------------------------------

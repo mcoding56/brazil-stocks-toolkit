@@ -187,7 +187,7 @@ def momentum_backtest(
 ) -> dict:
     """
     Run the walk-forward momentum backtest and return a JSON-friendly dict
-    (``summary`` records, ``equity`` curve, ``params``) so Streamlit can cache it.
+    (summary/equity plus ticker-level attribution tables) so Streamlit can cache it.
     Returns an empty dict when there is not enough price history.
 
     The backtest needs *breadth* (a wide universe and a long window) to be
@@ -209,6 +209,9 @@ def momentum_backtest(
     return {
         "summary": res.summary.reset_index(names="basket"),
         "equity": res.equity_curves.reset_index(),
+        "asset_periods": res.asset_periods.copy(),
+        "weekly_paths": res.weekly_paths.copy(),
+        "score_diagnostics": res.score_diagnostics.copy(),
         "params": {**res.params, "source": "full DB" if path == FULL_DB else "slim DB"},
         "headline": res.headline(),
         "top_label": res.top_label,

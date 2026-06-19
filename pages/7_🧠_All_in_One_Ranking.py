@@ -1,6 +1,7 @@
 """The Claude Screen — an opinionated, reliability-weighted composite."""
 from __future__ import annotations
 
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -215,6 +216,205 @@ with st.expander("Run the momentum backtest", expanded=False):
             }),
             use_container_width=True, hide_index=True,
         )
+
+        asset = bt.get("asset_periods", pd.DataFrame())
+        weekly = bt.get("weekly_paths", pd.DataFrame())
+        diag = bt.get("score_diagnostics", pd.DataFrame())
+
+        if not asset.empty:
+            st.markdown("#### Score implication tracker (ticker-level)")
+            corr = p.get("pooled_score_return_corr")
+            obs = p.get("asset_observations", len(asset))
+            if corr is not None:
+                st.caption(
+                    f"Pooled score→next-return correlation: **{corr:.2f}** "
+                    f"across {obs:,} ticker-month observations."
+                )
+
+            asset = asset.copy()
+            asset["rebalance_date"] = pd.to_datetime(asset["rebalance_date"])
+            asset["period_end"] = pd.to_datetime(asset["period_end"])
+
+            with st.expander("How each asset performed at each rebalance", expanded=False):
+                rebalances = sorted(asset["rebalance_date"].dropna().unique())
+                if rebalances:
+                    default_reb = rebalances[-1]
+                    reb = st.selectbox(
+                        "Rebalance date",
+                        rebalances,
+                        index=len(rebalances) - 1,
+                        format_func=lambda x: pd.Timestamp(x).date().isoformat(),
+                        key="bt_reb_date",
+                    )
+                    n_show = st.slider(
+                        "Rows per side (top and bottom momentum)",
+                        min_value=5,
+                        max_value=60,
+                        value=20,
+                        step=5,
+                        key="bt_rows_per_side",
+                    )
+                    d = asset[asset["rebalance_date"] == pd.Timestamp(reb)].copy()
+                    d["vs_basket"] = d["fwd_return"] - d["basket_return"]
+                    top_tbl = d.sort_values("momentum_score", ascending=False).head(n_show)
+                    bot_tbl = d.sort_values("momentum_score", ascending=True).head(n_show)
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.caption("Best momentum scores at formation")
+                        st.dataframe(
+                            top_tbl[[
+                                "ticker", "basket", "momentum_score", "momentum_score_pct",
+                                "fwd_return", "basket_return", "vs_basket",
+                            ]].style.format({
+                                "momentum_score": "{:.1%}",
+                                "momentum_score_pct": "{:.0%}",
+                                "fwd_return": "{:.1%}",
+                                "basket_return": "{:.1%}",
+                                "vs_basket": "{:+.1%}",
+                            }),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    with c2:
+                        st.caption("Worst momentum scores at formation")
+                        st.dataframe(
+                            bot_tbl[[
+                                "ticker", "basket", "momentum_score", "momentum_score_pct",
+                                "fwd_return", "basket_return", "vs_basket",
+                            ]].style.format({
+                                "momentum_score": "{:.1%}",
+                                "momentum_score_pct": "{:.0%}",
+                                "fwd_return": "{:.1%}",
+                                "basket_return": "{:.1%}",
+                                "vs_basket": "{:+.1%}",
+                            }),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+            if not weekly.empty:
+                weekly = weekly.copy()
+                weekly["rebalance_date"] = pd.to_datetime(weekly["rebalance_date"])
+                weekly["date"] = pd.to_datetime(weekly["date"])
+
+                with st.expander("Weekly path: how each selected asset moved after scoring", expanded=False):
+                    reb_week = sorted(weekly["rebalance_date"].dropna().unique())
+                    reb_w = st.selectbox(
+                        "Weekly-path rebalance",
+                        reb_week,
+                        index=len(reb_week) - 1,
+                        format_func=lambda x: pd.Timestamp(x).date().isoformat(),
+                        key="bt_weekly_reb",
+                    )
+                    pool = weekly[weekly["rebalance_date"] == pd.Timestamp(reb_w)].copy()
+                    if pool.empty:
+                        st.info("No weekly path rows for this rebalance.")
+                    else:
+                        ranked = asset[asset["rebalance_date"] == pd.Timestamp(reb_w)].sort_values("momentum_score", ascending=False)
+                        defaults = ranked["ticker"].head(3).tolist() + ranked["ticker"].tail(2).tolist()
+                        defaults = [t for t in defaults if t in set(pool["ticker"])][:5]
+                        chosen = st.multiselect(
+                            "Pick tickers",
+                            sorted(pool["ticker"].unique().tolist()),
+                            default=defaults,
+                            key="bt_weekly_tickers",
+                        )
+                        if chosen:
+                            path = pool[pool["ticker"].isin(chosen)].sort_values(["ticker", "date"])
+                            fig_w = go.Figure()
+                            for tkr, grp in path.groupby("ticker"):
+                                fig_w.add_trace(
+                                    go.Scatter(
+                                        x=grp["date"],
+                                        y=grp["return_from_formation"],
+                                        mode="lines+markers",
+                                        name=tkr,
+                                    )
+                                )
+                            fig_w.add_hline(y=0.0, line_width=0.8, line_color="black", opacity=0.4)
+                            fig_w.update_layout(
+                                title="Weekly return path from formation date",
+                                yaxis_title="Return since formation",
+                                height=380,
+                                margin=dict(l=10, r=10, t=50, b=10),
+                            )
+                            st.plotly_chart(fig_w, use_container_width=True)
+                        else:
+                            st.info("Select at least one ticker.")
+
+            with st.expander("Score drift and next-month return by ticker", expanded=False):
+                tickers = sorted(asset["ticker"].unique().tolist())
+                ranked_all = asset.groupby("ticker", as_index=False)["momentum_score"].mean().sort_values("momentum_score", ascending=False)
+                default_tickers = ranked_all["ticker"].head(5).tolist()
+                chosen_t = st.multiselect(
+                    "Tickers to track",
+                    tickers,
+                    default=default_tickers,
+                    key="bt_drift_tickers",
+                )
+                if chosen_t:
+                    drift = asset[asset["ticker"].isin(chosen_t)].sort_values(["ticker", "rebalance_date"])
+
+                    fig_s = go.Figure()
+                    for tkr, grp in drift.groupby("ticker"):
+                        fig_s.add_trace(
+                            go.Scatter(
+                                x=grp["rebalance_date"],
+                                y=grp["momentum_score"],
+                                mode="lines+markers",
+                                name=f"{tkr} score",
+                            )
+                        )
+                    fig_s.update_layout(
+                        title="Momentum score drift (formation dates)",
+                        yaxis_title="Momentum score (12-1)",
+                        height=330,
+                        margin=dict(l=10, r=10, t=50, b=10),
+                    )
+                    st.plotly_chart(fig_s, use_container_width=True)
+
+                    fig_r = go.Figure()
+                    for tkr, grp in drift.groupby("ticker"):
+                        fig_r.add_trace(
+                            go.Bar(
+                                x=grp["rebalance_date"],
+                                y=grp["fwd_return"],
+                                name=f"{tkr} next return",
+                                opacity=0.55,
+                            )
+                        )
+                    fig_r.add_hline(y=0.0, line_width=0.8, line_color="black", opacity=0.4)
+                    fig_r.update_layout(
+                        title="Next-period return after each score",
+                        yaxis_title="Forward return",
+                        barmode="group",
+                        height=330,
+                        margin=dict(l=10, r=10, t=50, b=10),
+                    )
+                    st.plotly_chart(fig_r, use_container_width=True)
+
+                if isinstance(diag, pd.DataFrame) and not diag.empty:
+                    ddiag = diag.copy()
+                    ddiag["rebalance_date"] = pd.to_datetime(ddiag["rebalance_date"])
+                    fig_d = go.Figure()
+                    fig_d.add_trace(
+                        go.Scatter(
+                            x=ddiag["rebalance_date"],
+                            y=ddiag["score_return_corr"],
+                            mode="lines+markers",
+                            name="Score→return correlation",
+                            line=dict(color="#1f77b4", width=2.0),
+                        )
+                    )
+                    fig_d.add_hline(y=0.0, line_width=0.8, line_color="black", opacity=0.4)
+                    fig_d.update_layout(
+                        title="Cross-sectional correlation by rebalance",
+                        yaxis_title="corr(score, next return)",
+                        height=300,
+                        margin=dict(l=10, r=10, t=45, b=10),
+                    )
+                    st.plotly_chart(fig_d, use_container_width=True)
+
         st.caption(
             "Survivorship caveat: the panel is whatever the database holds today, so absolute "
             "levels flatter the survivors. The monotonic top-vs-bottom spread is the real signal."

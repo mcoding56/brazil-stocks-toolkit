@@ -109,7 +109,9 @@ class YFinanceFetcher(BaseFetcher):
         pd.DataFrame
             Columns: ticker, date, open, high, low, close, volume
         """
-        sa_tickers = [_add_suffix(t) for t in tickers]
+        # Deduplicate while preserving order to avoid redundant network calls.
+        clean_tickers = list(dict.fromkeys(tickers))
+        sa_tickers = [_add_suffix(t) for t in clean_tickers]
         period = period or self.period
 
         chunks = [
@@ -131,6 +133,7 @@ class YFinanceFetcher(BaseFetcher):
 
         result = pd.concat(frames, ignore_index=True)
         result["ticker"] = result["ticker"].apply(_strip_suffix)
+        result = result.drop_duplicates(subset=["ticker", "date"]).reset_index(drop=True)
         return result
 
     def to_price_bars(self, df: pd.DataFrame) -> List[PriceBar]:
@@ -431,6 +434,12 @@ class YFinanceFetcher(BaseFetcher):
             sub = raw[[date_col] + src_cols].copy()
             sub.columns = ["date"] + dst_cols
             sub["date"] = pd.to_datetime(sub["date"]).dt.date
+            # Some tickers are returned with all-NaN bars; treat them as no data.
+            if "close" not in sub.columns:
+                continue
+            sub = sub[sub["close"].notna()].copy()
+            if sub.empty:
+                continue
             sub.insert(0, "ticker", ticker)
             frames.append(sub)
 

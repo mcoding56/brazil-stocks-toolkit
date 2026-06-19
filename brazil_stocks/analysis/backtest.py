@@ -64,6 +64,9 @@ class BacktestResult:
     equity_curves: pd.DataFrame      # date-indexed, one column per basket + Universe + LongShort
     period_returns: pd.DataFrame     # per-rebalance returns, same columns
     summary: pd.DataFrame            # one row per basket: CAGR, Vol, Sharpe, MaxDD, HitRate, Periods
+    asset_periods: pd.DataFrame      # one row per ticker/rebalance with score, basket and forward return
+    weekly_paths: pd.DataFrame       # intra-hold weekly path per ticker (return from formation)
+    score_diagnostics: pd.DataFrame  # per-rebalance correlation(score, forward return)
     params: dict                     # the run configuration (for reproducibility)
 
     @property
@@ -201,6 +204,8 @@ class MomentumBacktester:
         q_labels = [f"Q{i}" for i in range(1, self.n_quantiles + 1)]
         period_rows: list[dict] = []
         period_dates: list[pd.Timestamp] = []
+        asset_rows: list[dict] = []
+        weekly_rows: list[dict] = []
 
         i = first_form
         last_i = len(dates) - self.hold - 1
@@ -234,6 +239,7 @@ class MomentumBacktester:
 
             mom = momentum[names]
             ret = fwd[names]
+            mom_pct = mom.rank(pct=True)
 
             # Equal-count quantile baskets (1 = lowest momentum … N = highest).
             try:
@@ -250,6 +256,51 @@ class MomentumBacktester:
             row["Universe"] = float(ret.mean())
             row["LongShort"] = row[q_labels[-1]] - row[q_labels[0]]
 
+            # Ticker-level attribution at this rebalance.
+            bucket_ret = {
+                q: (float(ret[buckets.index[buckets == q]].mean()) if (buckets == q).any() else np.nan)
+                for q in q_labels
+            }
+            period_end = dates[i + self.hold]
+            for ticker in names:
+                b = str(buckets.loc[ticker])
+                asset_rows.append(
+                    {
+                        "rebalance_date": form_date,
+                        "period_end": period_end,
+                        "ticker": ticker,
+                        "basket": b,
+                        "momentum_score": float(mom.loc[ticker]),
+                        "momentum_score_pct": float(mom_pct.loc[ticker]),
+                        "fwd_return": float(ret.loc[ticker]),
+                        "basket_return": bucket_ret.get(b),
+                    }
+                )
+
+                # Weekly path inside the hold window (0, 5, 10, 15, 20 trading days + period end).
+                base_price = close.loc[form_date, ticker]
+                if pd.isna(base_price) or base_price <= 0:
+                    continue
+                step_offsets = list(range(0, self.hold + 1, 5))
+                if self.hold not in step_offsets:
+                    step_offsets.append(self.hold)
+                for off in step_offsets:
+                    d = dates[i + off]
+                    px = close.loc[d, ticker]
+                    if pd.isna(px) or px <= 0:
+                        continue
+                    weekly_rows.append(
+                        {
+                            "rebalance_date": form_date,
+                            "date": d,
+                            "ticker": ticker,
+                            "basket": b,
+                            "momentum_score": float(mom.loc[ticker]),
+                            "week_index": int(off // 5),
+                            "return_from_formation": float(px / base_price - 1.0),
+                        }
+                    )
+
             period_rows.append(row)
             period_dates.append(dates[i + self.hold])
             i += self.hold
@@ -263,6 +314,28 @@ class MomentumBacktester:
 
         # Equity curves start at 1.0 one period before the first realised return.
         equity = (1.0 + period_returns).cumprod()
+
+        asset_periods = pd.DataFrame(asset_rows)
+        weekly_paths = pd.DataFrame(weekly_rows)
+
+        if not asset_periods.empty:
+            pooled_corr = asset_periods["momentum_score"].corr(asset_periods["fwd_return"])
+            by_rebalance = (
+                asset_periods.groupby("rebalance_date")
+                .apply(
+                    lambda g: pd.Series(
+                        {
+                            "n_assets": int(len(g)),
+                            "score_return_corr": g["momentum_score"].corr(g["fwd_return"]),
+                        }
+                    )
+                )
+                .reset_index()
+                .sort_values("rebalance_date")
+            )
+        else:
+            pooled_corr = np.nan
+            by_rebalance = pd.DataFrame(columns=["rebalance_date", "n_assets", "score_return_corr"])
 
         periods_per_year = _DAYS_12M / self.hold
         summary = self._summarise(period_returns, equity, periods_per_year)
@@ -280,11 +353,16 @@ class MomentumBacktester:
             "start": str(period_returns.index.min().date()),
             "end": str(period_returns.index.max().date()),
             "universe_size": close.shape[1],
+            "pooled_score_return_corr": (None if pd.isna(pooled_corr) else float(pooled_corr)),
+            "asset_observations": int(len(asset_periods)),
         }
         return BacktestResult(
             equity_curves=equity,
             period_returns=period_returns,
             summary=summary,
+            asset_periods=asset_periods,
+            weekly_paths=weekly_paths,
+            score_diagnostics=by_rebalance,
             params=params,
         )
 
