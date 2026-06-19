@@ -48,6 +48,23 @@ Community Cloud, the refresh button updates the running app instance. If you wan
 the committed dashboard data to stay fresh between restarts, run a scheduled
 GitHub Action that rebuilds and commits `data/brazil_stocks_slim.db`.
 
+### Keep Streamlit Cloud data updated automatically
+
+This repo includes a scheduled workflow at
+`.github/workflows/refresh-dataset.yml` that:
+
+1. Runs every weekday after market close (22:45 UTC)
+2. Refreshes the full local DB via `update_database()`
+3. Rebuilds `data/brazil_stocks_slim.db`
+4. Commits and pushes the slim DB only when it changed
+
+Enable it in GitHub:
+
+1. Open **Actions** tab and allow workflows for the repository
+2. Open **Refresh Streamlit Dataset** workflow
+3. Click **Run workflow** once to seed and verify
+4. Confirm the commit reaches `master` and Streamlit Cloud auto-redeploys
+
 ### Regenerate the slim database (optional)
 
 The app ships with a pre-built read-only `data/brazil_stocks_slim.db`. To rebuild it
