@@ -194,14 +194,25 @@ class StockAnalysisOrchestrator:
         fund_df = self.fundamentus.fetch()
         stocks = self.fundamentus.to_stocks(fund_df)
         snapshots = self.fundamentus.to_snapshots(fund_df)
-        self.db.upsert_stocks(stocks)
-        self.db.upsert_fundamental_snapshots(snapshots)
+        if stocks:
+            self.db.upsert_stocks(stocks)
+        if snapshots:
+            self.db.upsert_fundamental_snapshots(snapshots)
         summary["stocks_upserted"] = len(stocks)
         summary["snapshots_upserted"] = len(snapshots)
         logger.info("  → %d stocks, %d snapshots stored.", len(stocks), len(snapshots))
+        if not stocks:
+            logger.warning(
+                "No fundamentals fetched this run; falling back to existing DB universe for downstream steps."
+            )
 
         # Determine universe
-        universe = tickers or [s.ticker for s in stocks]
+        if tickers:
+            universe = tickers
+        elif stocks:
+            universe = [s.ticker for s in stocks]
+        else:
+            universe = self.db.get_all_tickers()
         summary["universe_size"] = len(universe)
         active_universe = list(dict.fromkeys(universe))
 

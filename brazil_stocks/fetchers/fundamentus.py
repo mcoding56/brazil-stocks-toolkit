@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import date
 from typing import Optional
 
@@ -44,6 +45,8 @@ _HEADERS = {
     "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
     "Referer": "https://www.fundamentus.com.br/",
 }
+_MAX_RETRIES = 3
+_RETRY_DELAY = 2.0
 
 # Map fundamentus Portuguese column headers → our internal names
 # (these match the actual <th> text returned by the current site as of 2025-2026)
@@ -153,6 +156,15 @@ class FundamentusFetcher(BaseFetcher):
                      dy, roe, net_margin, debt_equity, snapshot_date
         """
         raw_df = self._download()
+        if raw_df.empty:
+            logger.warning("FundamentusFetcher: empty payload returned; continuing with no new fundamentals.")
+            return pd.DataFrame(columns=[
+                "ticker", "name", "sector", "price",
+                "pl", "pvp", "ps", "ev_ebitda", "ev_ebit", "p_ebit",
+                "dy", "roe", "roic", "gross_margin", "ebit_margin", "net_margin",
+                "debt_equity", "current_ratio", "book_value", "liquidity_2m",
+                "revenue_growth_5y", "snapshot_date",
+            ])
         df = self._clean(raw_df)
         df["snapshot_date"] = date.today().isoformat()
         logger.info("FundamentusFetcher: %d equities fetched", len(df))
@@ -210,29 +222,48 @@ class FundamentusFetcher(BaseFetcher):
         """POST to fundamentus and parse the HTML table."""
         import io as _io
 
-        # The result page requires a POST with an empty payload (or default
-        # filter values) to return the full list of stocks.
-        resp = requests.post(
-            _URL,
-            data={},
-            headers=_HEADERS,
-            timeout=self.timeout,
-        )
-        resp.raise_for_status()
-        # Fundamentus serves ISO-8859-1; let requests decode correctly
-        resp.encoding = resp.apparent_encoding or "iso-8859-1"
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                # The result page requires a POST with an empty payload (or default
+                # filter values) to return the full list of stocks.
+                resp = requests.post(
+                    _URL,
+                    data={},
+                    headers=_HEADERS,
+                    timeout=self.timeout,
+                )
+                resp.raise_for_status()
+                # Fundamentus serves ISO-8859-1; let requests decode correctly
+                resp.encoding = resp.apparent_encoding or "iso-8859-1"
 
-        # Newer pandas/lxml requires a file-like object, not a raw HTML string
-        tables = pd.read_html(
-            _io.StringIO(resp.text),
-            decimal=",",
-            thousands=".",
-            flavor="lxml",
-        )
-        if not tables:
-            raise ValueError("No HTML tables found on fundamentus resultado page.")
-        # The first (and usually only) table holds the data
-        return tables[0]
+                # Newer pandas/lxml requires a file-like object, not a raw HTML string
+                tables = pd.read_html(
+                    _io.StringIO(resp.text),
+                    decimal=",",
+                    thousands=".",
+                    flavor="lxml",
+                )
+                if not tables:
+                    logger.warning(
+                        "Fundamentus _download attempt %d/%d returned no tables.",
+                        attempt,
+                        _MAX_RETRIES,
+                    )
+                else:
+                    # The first (and usually only) table holds the data
+                    return tables[0]
+            except Exception as exc:
+                logger.warning(
+                    "Fundamentus _download attempt %d/%d failed: %s",
+                    attempt,
+                    _MAX_RETRIES,
+                    exc,
+                )
+            if attempt < _MAX_RETRIES:
+                time.sleep(_RETRY_DELAY * attempt)
+
+        logger.warning("Fundamentus _download exhausted retries; returning empty DataFrame.")
+        return pd.DataFrame()
 
     def _clean(self, raw: pd.DataFrame) -> pd.DataFrame:
         # Rename columns we recognise
