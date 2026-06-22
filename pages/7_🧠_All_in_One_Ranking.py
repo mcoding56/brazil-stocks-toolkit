@@ -235,7 +235,8 @@ with st.expander("Run the momentum backtest", expanded=False):
             asset["rebalance_date"] = pd.to_datetime(asset["rebalance_date"])
             asset["period_end"] = pd.to_datetime(asset["period_end"])
 
-            with st.expander("How each asset performed at each rebalance", expanded=False):
+            st.markdown("##### How each asset performed at each rebalance")
+            with st.container(border=True):
                 rebalances = sorted(asset["rebalance_date"].dropna().unique())
                 if rebalances:
                     default_reb = rebalances[-1]
@@ -297,7 +298,8 @@ with st.expander("Run the momentum backtest", expanded=False):
                 weekly["rebalance_date"] = pd.to_datetime(weekly["rebalance_date"])
                 weekly["date"] = pd.to_datetime(weekly["date"])
 
-                with st.expander("Weekly path: how each selected asset moved after scoring", expanded=False):
+                st.markdown("##### Weekly path: how each selected asset moved after scoring")
+                with st.container(border=True):
                     reb_week = sorted(weekly["rebalance_date"].dropna().unique())
                     reb_w = st.selectbox(
                         "Weekly-path rebalance",
@@ -342,7 +344,8 @@ with st.expander("Run the momentum backtest", expanded=False):
                         else:
                             st.info("Select at least one ticker.")
 
-            with st.expander("Score drift and next-month return by ticker", expanded=False):
+            st.markdown("##### Score drift and next-month return by ticker")
+            with st.container(border=True):
                 tickers = sorted(asset["ticker"].unique().tolist())
                 ranked_all = asset.groupby("ticker", as_index=False)["momentum_score"].mean().sort_values("momentum_score", ascending=False)
                 default_tickers = ranked_all["ticker"].head(5).tolist()
