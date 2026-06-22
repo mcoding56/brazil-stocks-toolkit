@@ -328,6 +328,11 @@ class YFinanceFetcher(BaseFetcher):
         if divs.empty:
             return None
         try:
+            # Coerce to numeric — yfinance occasionally returns string values
+            # for certain tickers which would break the <= 0 comparison below.
+            divs = pd.to_numeric(divs, errors="coerce").dropna()
+            if divs.empty:
+                return None
             annual = divs.groupby(divs.index.year).sum()
         except Exception:
             return None
@@ -337,9 +342,12 @@ class YFinanceFetcher(BaseFetcher):
         annual = annual[annual.index < current_year]
         if len(annual) < years + 1:
             return None
-        recent = annual.iloc[-1]
-        base = annual.iloc[-(years + 1)]
-        if base is None or base <= 0 or recent <= 0:
+        try:
+            recent = float(annual.iloc[-1])
+            base = float(annual.iloc[-(years + 1)])
+        except (TypeError, ValueError):
+            return None
+        if base <= 0 or recent <= 0:
             return None
         return float((recent / base) ** (1 / years) - 1)
 

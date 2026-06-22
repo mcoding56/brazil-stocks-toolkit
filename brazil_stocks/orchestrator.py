@@ -350,77 +350,81 @@ class StockAnalysisOrchestrator:
         updates: List[FundamentalSnapshot] = []
         sector_map: dict = {}
         for ticker in tqdm(tickers, desc="Valuation", unit="stock"):
-            row = by_ticker.get(ticker)
-            if row is None:
-                continue
-            price = _to_float(row.get("price"))
+            try:
+                row = by_ticker.get(ticker)
+                if row is None:
+                    continue
+                price = _to_float(row.get("price"))
 
-            fcf_ttm = self.yf.fetch_fcf_ttm(ticker)
-            info = self.yf.fetch_info(ticker)
-            shares = info.get("shares")
-            sector = info.get("sector")
-            if sector:
-                sector_map[ticker] = sector
-            fcf_per_share = (
-                fcf_ttm / shares
-                if fcf_ttm is not None and shares not in (None, 0)
-                else None
-            )
-
-            # Net debt: Fundamentus net-debt/equity is a percentage (73.0 = 0.73×),
-            # so scale by 100 before multiplying by book value (PL, absolute BRL).
-            de = _to_float(row.get("debt_equity"))
-            book = _to_float(row.get("book_value"))
-            net_debt = (de / 100.0) * book if de is not None and book is not None else None
-            net_debt_per_share = (
-                net_debt / shares
-                if net_debt is not None and shares not in (None, 0)
-                else None
-            )
-
-            # EBITDA & Net Debt/EBITDA from enterprise value: EV = market cap + net debt,
-            # then EBITDA = EV / (EV/EBITDA). Requires a positive ev_ebitda multiple.
-            ev_ebitda = _to_float(row.get("ev_ebitda"))
-            ebitda = None
-            net_debt_ebitda = None
-            if (
-                price is not None and shares not in (None, 0)
-                and net_debt is not None and ev_ebitda not in (None, 0)
-                and ev_ebitda > 0
-            ):
-                enterprise_value = price * shares + net_debt
-                ebitda = enterprise_value / ev_ebitda
-                if ebitda not in (None, 0) and ebitda > 0:
-                    net_debt_ebitda = net_debt / ebitda
-
-            # Growth estimate for the DCF: 5y revenue CAGR (Fundamentus is in %)
-            growth_raw = _to_float(row.get("revenue_growth_5y"))
-            growth = growth_raw / 100.0 if growth_raw is not None else None
-
-            dcf = self.dcf_valuator.value_share(
-                ticker,
-                fcf_per_share=fcf_per_share,
-                price=price,
-                growth_rate=growth,
-                net_debt_per_share=net_debt_per_share,
-            )
-
-            div_cagr = self.yf.fetch_dividend_cagr(ticker)
-
-            updates.append(
-                FundamentalSnapshot(
-                    ticker=ticker,
-                    snapshot_date=snap,
-                    fcf_ttm=fcf_ttm,
-                    fcf_per_share=fcf_per_share,
-                    net_debt=net_debt,
-                    ebitda=ebitda,
-                    net_debt_ebitda=net_debt_ebitda,
-                    dividend_cagr_5y=div_cagr,
-                    intrinsic_value=dcf.intrinsic_value,
-                    margin_of_safety=dcf.margin_of_safety,
+                fcf_ttm = self.yf.fetch_fcf_ttm(ticker)
+                info = self.yf.fetch_info(ticker)
+                shares = _to_float(info.get("shares"))
+                sector = info.get("sector")
+                if sector:
+                    sector_map[ticker] = sector
+                fcf_per_share = (
+                    fcf_ttm / shares
+                    if fcf_ttm is not None and shares not in (None, 0)
+                    else None
                 )
-            )
+
+                # Net debt: Fundamentus net-debt/equity is a percentage (73.0 = 0.73×),
+                # so scale by 100 before multiplying by book value (PL, absolute BRL).
+                de = _to_float(row.get("debt_equity"))
+                book = _to_float(row.get("book_value"))
+                net_debt = (de / 100.0) * book if de is not None and book is not None else None
+                net_debt_per_share = (
+                    net_debt / shares
+                    if net_debt is not None and shares not in (None, 0)
+                    else None
+                )
+
+                # EBITDA & Net Debt/EBITDA from enterprise value: EV = market cap + net debt,
+                # then EBITDA = EV / (EV/EBITDA). Requires a positive ev_ebitda multiple.
+                ev_ebitda = _to_float(row.get("ev_ebitda"))
+                ebitda = None
+                net_debt_ebitda = None
+                if (
+                    price is not None and shares not in (None, 0)
+                    and net_debt is not None and ev_ebitda not in (None, 0)
+                    and ev_ebitda > 0
+                ):
+                    enterprise_value = price * shares + net_debt
+                    ebitda = enterprise_value / ev_ebitda
+                    if ebitda not in (None, 0) and ebitda > 0:
+                        net_debt_ebitda = net_debt / ebitda
+
+                # Growth estimate for the DCF: 5y revenue CAGR (Fundamentus is in %)
+                growth_raw = _to_float(row.get("revenue_growth_5y"))
+                growth = growth_raw / 100.0 if growth_raw is not None else None
+
+                dcf = self.dcf_valuator.value_share(
+                    ticker,
+                    fcf_per_share=fcf_per_share,
+                    price=price,
+                    growth_rate=growth,
+                    net_debt_per_share=net_debt_per_share,
+                )
+
+                div_cagr = self.yf.fetch_dividend_cagr(ticker)
+
+                updates.append(
+                    FundamentalSnapshot(
+                        ticker=ticker,
+                        snapshot_date=snap,
+                        fcf_ttm=fcf_ttm,
+                        fcf_per_share=fcf_per_share,
+                        net_debt=net_debt,
+                        ebitda=ebitda,
+                        net_debt_ebitda=net_debt_ebitda,
+                        dividend_cagr_5y=div_cagr,
+                        intrinsic_value=dcf.intrinsic_value,
+                        margin_of_safety=dcf.margin_of_safety,
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Valuation step failed for %s: %s — skipping.", ticker, exc)
+                continue
 
         if not updates:
             return 0
